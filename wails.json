@@ -1,0 +1,13 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "PWDTT",
+  "outputfilename": "pwdtt",
+  "frontend:install": "npm install",
+  "frontend:build": "npm run build",
+  "frontend:dev:watcher": "npm run dev",
+  "frontend:dev:serverUrl": "http://localhost:5173",
+  "postbuildcommand": "cp bin/go_client build/bin/go_client",
+  "author": {
+    "name": "PWDTT"
+  }
+}

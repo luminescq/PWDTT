@@ -1,0 +1,20 @@
+# Build output
+build/bin/
+
+# Node
+frontend/node_modules/
+frontend/dist/
+
+# Wails generated bindings (regenerated on build)
+frontend/wailsjs/
+
+# Go build artifacts
+*.exe
+*.so
+*.dylib
+
+# Temp / IDE
+.directory
+.idea/
+.vscode/
+*.swp
