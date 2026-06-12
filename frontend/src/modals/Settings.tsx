@@ -7,44 +7,44 @@ import type { AppSettings } from '../lib/types';
 import { SetTrayEnabled, SetAutoStart, GetAutoStart } from '../../wailsjs/go/backend/App';
 
 interface Props {
-  onClose: () => void;
+    onClose: () => void;
 }
 
 export default function Settings({ onClose }: Props) {
-  const [settings, setSettings] = useState<AppSettings>(() => settingsStore.get());
-  const [hashOpen, setHashOpen] = useState(false);
-  const [mtuRaw, setMtuRaw] = useState(String(settingsStore.get().mtu ?? 1280));
-  const mtuValid = (() => { const n = Number(mtuRaw); return Number.isInteger(n) && n >= 576 && n <= 1500; })();
-  const [tunnelState, setTunnelState] = useState(() => tunnelStore.get());
-  useEffect(() => tunnelStore.subscribe(setTunnelState), []);
-  const locked = tunnelState === 'connected' || tunnelState === 'connecting';
-  const [advancedOpen, setAdvancedOpen] = useState(false);
-  const [advancedConfirm, setAdvancedConfirm] = useState(false);
+    const [settings, setSettings] = useState<AppSettings>(() => settingsStore.get());
+    const [hashOpen, setHashOpen] = useState(false);
+    const [mtuRaw, setMtuRaw] = useState(String(settingsStore.get().mtu ?? 1280));
+    const mtuValid = (() => { const n = Number(mtuRaw); return Number.isInteger(n) && n >= 576 && n <= 1500; })();
+    const [tunnelState, setTunnelState] = useState(() => tunnelStore.get());
+    useEffect(() => tunnelStore.subscribe(setTunnelState), []);
+    const locked = tunnelState === 'connected' || tunnelState === 'connecting';
+    const [advancedOpen, setAdvancedOpen] = useState(false);
+    const [advancedConfirm, setAdvancedConfirm] = useState(false);
 
-  // Sync autoStart from backend on open
-  useEffect(() => {
-    GetAutoStart().then(v => {
-      if (v !== settings.autoStart) update('autoStart', v);
-    });
-  }, []);
+    const update = <K extends keyof AppSettings>(key: K, value: AppSettings[K]) => {
+        setSettings(s => ({ ...s, [key]: value }));
+    };
 
-  const update = <K extends keyof AppSettings>(key: K, value: AppSettings[K]) => {
-    setSettings(s => ({ ...s, [key]: value }));
-  };
+    // Sync autoStart from backend on open
+    useEffect(() => {
+        GetAutoStart().then((v: boolean) => {
+            if (v !== settings.autoStart) update('autoStart', v);
+        });
+    }, []);
 
-  const handleClose = () => {
-    const n = Number(mtuRaw);
-    const mtu = mtuValid ? n : settings.mtu;
-    settingsStore.save({ ...settings, mtu });
-    onClose();
-  };
+    const handleClose = () => {
+        const n = Number(mtuRaw);
+        const mtu = mtuValid ? n : settings.mtu;
+        settingsStore.save({ ...settings, mtu });
+        onClose();
+    };
 
-  const filledHashes = settings.hashes.filter(h => h.trim()).length;
-  const powerMax = Math.max(9, filledHashes * 27);
+    const filledHashes = settings.hashes.filter(h => h.trim()).length;
+    const powerMax = Math.max(9, filledHashes * 27);
 
-  return (
-    <>
-      <style>{`
+    return (
+        <>
+            <style>{`
         .st-overlay { position: fixed; inset: 0; background: var(--overlay-bg); backdrop-filter: blur(4px); display: flex; align-items: center; justify-content: center; z-index: 100; animation: overlay-in 0.3s ease-out; }
         .st-modal { background: var(--surface); border-radius: 14px; padding: 20px; width: 380px; max-width: 95vw; box-shadow: var(--shadow); animation: modal-in 0.3s ease-out; border: 1px solid var(--border); }
         .st-header { display: flex; align-items: center; gap: 10px; margin-bottom: 18px; color: var(--text); }
@@ -86,119 +86,119 @@ export default function Settings({ onClose }: Props) {
         .st-confirm-btn--cancel { background: var(--seg-bg); color: var(--text); }
         .st-confirm-btn--ok { background: var(--accent); color: var(--accent-fg); }
       `}</style>
-      <div className="st-overlay" onClick={handleClose}>
-        <div className="st-modal" onClick={e => e.stopPropagation()}>
-          <div className="st-header">
-            <IconSettings2 stroke={2} size={20} />
-            <span className="st-title">Настройки</span>
-            <button className="st-close" onClick={handleClose}>✕</button>
-          </div>
+            <div className="st-overlay" onClick={handleClose}>
+                <div className="st-modal" onClick={e => e.stopPropagation()}>
+                    <div className="st-header">
+                        <IconSettings2 stroke={2} size={20} />
+                        <span className="st-title">Настройки</span>
+                        <button className="st-close" onClick={handleClose}>✕</button>
+                    </div>
 
-          {locked && <div className="st-lock-hint">Недоступно во время подключения</div>}
+                    {locked && <div className="st-lock-hint">Недоступно во время подключения</div>}
 
-          {settings.useGlobalHashes ? (
-            <div className={`st-slider-wrap${locked ? ' st-locked' : ''}`}>
-              <div className="st-slider-label"><span>Мощность</span><span>{settings.power}</span></div>
-              <input
-                type="range" min={9} max={powerMax} step={9} value={Math.min(settings.power, powerMax)}
-                className="st-slider"
-                style={{ '--v': Math.round((Math.min(settings.power, powerMax) - 9) / Math.max(powerMax - 9, 1) * 100) } as React.CSSProperties}
-                onChange={e => update('power', +e.target.value)}
-              />
+                    {settings.useGlobalHashes ? (
+                        <div className={`st-slider-wrap${locked ? ' st-locked' : ''}`}>
+                            <div className="st-slider-label"><span>Мощность</span><span>{settings.power}</span></div>
+                            <input
+                                type="range" min={9} max={powerMax} step={9} value={Math.min(settings.power, powerMax)}
+                                className="st-slider"
+                                style={{ '--v': Math.round((Math.min(settings.power, powerMax) - 9) / Math.max(powerMax - 9, 1) * 100) } as React.CSSProperties}
+                                onChange={e => update('power', +e.target.value)}
+                            />
+                        </div>
+                    ) : (
+                        <div className="st-slider-wrap" style={{ opacity: 0.5 }}>
+                            <div className="st-slider-label"><span>Мощность</span><span>профиль</span></div>
+                            <div style={{ fontSize: 12, color: 'var(--text-3)' }}>Настраивается в редакторе профиля</div>
+                        </div>
+                    )}
+
+                    <div className="st-row">
+                        <span>Трей</span>
+                        <button className={`st-toggle st-toggle--${settings.tray ? 'on' : 'off'}`} onClick={() => {
+                            const next = !settings.tray;
+                            update('tray', next);
+                            SetTrayEnabled(next);
+                        }} />
+                    </div>
+
+                    <div className="st-row">
+                        <span>Запускать при старте</span>
+                        <button className={`st-toggle st-toggle--${settings.autoStart ? 'on' : 'off'}`} onClick={() => {
+                            const next = !settings.autoStart;
+                            update('autoStart', next);
+                            SetAutoStart(next);
+                        }} />
+                    </div>
+
+                    <div className="st-row">
+                        <span>Глобальные хеши</span>
+                        <button className={`st-toggle st-toggle--${settings.useGlobalHashes ? 'on' : 'off'}`} onClick={() => update('useGlobalHashes', !settings.useGlobalHashes)} />
+                    </div>
+
+                    <button
+                        className="st-hash-btn"
+                        style={!settings.useGlobalHashes ? { opacity: 0.35, pointerEvents: 'none' } : undefined}
+                        onClick={() => setHashOpen(true)}
+                        title={!settings.useGlobalHashes ? 'Глобальные хеши отключены — используются хеши профиля' : undefined}
+                    >
+                        <IconHash stroke={2} size={16} />
+                        VK Хеши ({filledHashes}/4)
+                    </button>
+
+                    <button
+                        className={`st-adv-toggle${advancedOpen ? ' st-adv-toggle--open' : ''}`}
+                        onClick={() => {
+                            if (!advancedOpen) setAdvancedConfirm(true);
+                            else setAdvancedOpen(false);
+                        }}
+                    >
+                        <span>Расширенные</span>
+                        <IconChevronDown stroke={2} size={16} />
+                    </button>
+
+                    <div className={`st-adv-body${advancedOpen ? ' st-adv-body--open' : ' st-adv-body--closed'}`}>
+                        <div className={`st-row${locked ? ' st-locked' : ''}`} style={{ marginTop: 10 }}>
+                            <span>MTU</span>
+                            <input
+                                type="number" min={576} max={1500} step={1}
+                                value={mtuRaw}
+                                className={`st-num-input${!mtuValid ? ' st-num-input--error' : ''}`}
+                                onChange={e => setMtuRaw(e.target.value)}
+                                onBlur={() => {
+                                    const n = Number(mtuRaw);
+                                    const clamped = Number.isFinite(n) ? Math.max(576, Math.min(1500, Math.round(n))) : 1280;
+                                    setMtuRaw(String(clamped));
+                                    update('mtu', clamped);
+                                }}
+                            />
+                        </div>
+                    </div>
+                </div>
             </div>
-          ) : (
-            <div className="st-slider-wrap" style={{ opacity: 0.5 }}>
-              <div className="st-slider-label"><span>Мощность</span><span>профиль</span></div>
-              <div style={{ fontSize: 12, color: 'var(--text-3)' }}>Настраивается в редакторе профиля</div>
-            </div>
-          )}
 
-          <div className="st-row">
-            <span>Трей</span>
-            <button className={`st-toggle st-toggle--${settings.tray ? 'on' : 'off'}`} onClick={() => {
-              const next = !settings.tray;
-              update('tray', next);
-              SetTrayEnabled(next);
-            }} />
-          </div>
-
-          <div className="st-row">
-            <span>Запускать при старте</span>
-            <button className={`st-toggle st-toggle--${settings.autoStart ? 'on' : 'off'}`} onClick={() => {
-              const next = !settings.autoStart;
-              update('autoStart', next);
-              SetAutoStart(next);
-            }} />
-          </div>
-
-          <div className="st-row">
-            <span>Глобальные хеши</span>
-            <button className={`st-toggle st-toggle--${settings.useGlobalHashes ? 'on' : 'off'}`} onClick={() => update('useGlobalHashes', !settings.useGlobalHashes)} />
-          </div>
-
-          <button
-            className="st-hash-btn"
-            style={!settings.useGlobalHashes ? { opacity: 0.35, pointerEvents: 'none' } : undefined}
-            onClick={() => setHashOpen(true)}
-            title={!settings.useGlobalHashes ? 'Глобальные хеши отключены — используются хеши профиля' : undefined}
-          >
-            <IconHash stroke={2} size={16} />
-            VK Хеши ({filledHashes}/4)
-          </button>
-
-          <button
-            className={`st-adv-toggle${advancedOpen ? ' st-adv-toggle--open' : ''}`}
-            onClick={() => {
-              if (!advancedOpen) setAdvancedConfirm(true);
-              else setAdvancedOpen(false);
-            }}
-          >
-            <span>Расширенные</span>
-            <IconChevronDown stroke={2} size={16} />
-          </button>
-
-          <div className={`st-adv-body${advancedOpen ? ' st-adv-body--open' : ' st-adv-body--closed'}`}>
-            <div className={`st-row${locked ? ' st-locked' : ''}`} style={{ marginTop: 10 }}>
-              <span>MTU</span>
-              <input
-                type="number" min={576} max={1500} step={1}
-                value={mtuRaw}
-                className={`st-num-input${!mtuValid ? ' st-num-input--error' : ''}`}
-                onChange={e => setMtuRaw(e.target.value)}
-                onBlur={() => {
-                  const n = Number(mtuRaw);
-                  const clamped = Number.isFinite(n) ? Math.max(576, Math.min(1500, Math.round(n))) : 1280;
-                  setMtuRaw(String(clamped));
-                  update('mtu', clamped);
-                }}
-              />
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {advancedConfirm && (
-        <div className="st-confirm-overlay" onClick={() => setAdvancedConfirm(false)}>
-          <div className="st-confirm" onClick={e => e.stopPropagation()}>
-            <div className="st-confirm-title">⚠ Расширенные настройки</div>
-            <div className="st-confirm-text">
-              Изменение этих параметров может нарушить работу туннеля.
-              Продолжать только если вы понимаете что делаете.
-            </div>
-            <div className="st-confirm-actions">
-              <button className="st-confirm-btn st-confirm-btn--cancel" onClick={() => setAdvancedConfirm(false)}>Отмена</button>
-              <button className="st-confirm-btn st-confirm-btn--ok" onClick={() => { setAdvancedConfirm(false); setAdvancedOpen(true); }}>Продолжить</button>
-            </div>
-          </div>
-        </div>
-      )}
-      {hashOpen && (
-        <Hash
-          hashes={settings.hashes}
-          onClose={() => setHashOpen(false)}
-          onSave={hashes => update('hashes', hashes)}
-        />
-      )}
-    </>
-  );
+            {advancedConfirm && (
+                <div className="st-confirm-overlay" onClick={() => setAdvancedConfirm(false)}>
+                    <div className="st-confirm" onClick={e => e.stopPropagation()}>
+                        <div className="st-confirm-title">⚠ Расширенные настройки</div>
+                        <div className="st-confirm-text">
+                            Изменение этих параметров может нарушить работу туннеля.
+                            Продолжать только если вы понимаете что делаете.
+                        </div>
+                        <div className="st-confirm-actions">
+                            <button className="st-confirm-btn st-confirm-btn--cancel" onClick={() => setAdvancedConfirm(false)}>Отмена</button>
+                            <button className="st-confirm-btn st-confirm-btn--ok" onClick={() => { setAdvancedConfirm(false); setAdvancedOpen(true); }}>Продолжить</button>
+                        </div>
+                    </div>
+                </div>
+            )}
+            {hashOpen && (
+                <Hash
+                    hashes={settings.hashes}
+                    onClose={() => setHashOpen(false)}
+                    onSave={hashes => update('hashes', hashes)}
+                />
+            )}
+        </>
+    );
 }
