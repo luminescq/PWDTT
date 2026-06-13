@@ -21,7 +21,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '18'
+          node-version: '22'
 
       - name: Install Linux dependencies
         run: |
@@ -74,4 +74,21 @@ jobs:
           files: |
             dist/pwdtt-linux-amd64
             dist/pwdtt-windows-amd64.exe
-          generate_release_notes: true
+          body: |
+            ## v1.2 - Linux - Windows
+
+            **Fix:**
+            - wdtt:// парсер (# в пароле больше не ломает)
+            - Баг стейла серверов (selectedRef)
+            - Margin пароля в модалках
+            - Деплой: SCP → dd (fix deadlock 12MB)
+
+            **Add:**
+            - Глазик пароля (toggle видимости)
+            - Авто-подключение при запуске
+            - Размер файла в логах деплоя
+            - Linux иконка (window + taskbar)
+            - GitHub Actions CI/CD
+
+            **Next:**
+            - macOS версия
