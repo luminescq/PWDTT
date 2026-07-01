@@ -48,7 +48,7 @@ export type DeployState = 'idle' | 'deploying' | 'removing';
 export const DEFAULT_SETTINGS: AppSettings = {
   bypassMode: 'АВТ',
   power: 9,
-  mtu: 1380,
+  mtu: 1300,
   tray: true,
   autoStart: true,
   autoConnect: false,

@@ -39,10 +39,10 @@
 Установите зависимости:
 ```bash
 # Ubuntu/Debian
-sudo apt install wireguard-tools libayatana-appindicator3-1
+sudo apt install wireguard-tools libayatana-appindicator3-1 libwebkit2gtk-4.1-dev
 
 # Arch
-sudo pacman -S wireguard-tools libayatana-appindicator
+sudo pacman -S wireguard-tools libayatana-appindicator webkit2gtk-4.1
 ```
 
 Разрешите команды `ip` и `wg` без пароля — добавьте в `/etc/sudoers` через `visudo`:
@@ -122,12 +122,12 @@ wdtt://1.2.3.4:56000:56001:0:mypassword:AbCdEfGh,XyZ12345#Мой сервер
 
 ```bash
 # Linux
-sudo apt install libayatana-appindicator3-dev pkg-config gcc
+sudo apt install libayatana-appindicator3-dev pkg-config gcc libwebkit2gtk-4.1-dev
 go install github.com/wailsapp/wails/v2/cmd/wails@latest
 
 git clone https://github.com/luminescq/PWDTT
 cd PWDTT
-wails build -platform linux/amd64 -o pwdtt-linux-amd64
+wails build -platform linux/amd64 -tags webkit2_41 -o pwdtt-linux-amd64
 # → build/bin/pwdtt-linux-amd64
 ```
 

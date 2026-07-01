@@ -61,7 +61,7 @@ func TestConnectParamsJSON(t *testing.T) {
 		Profile:     "my-profile",
 		CaptchaMode: "auto",
 		Workers:     5,
-		MTU:         1280,
+		MTU:         1300,
 		Hashes:      []string{"h1", "h2"},
 	}
 

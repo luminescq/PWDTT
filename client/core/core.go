@@ -21,7 +21,7 @@ type Config struct {
 	DeviceID    string   // -device-id
 	Workers     int      // -n
 	CaptchaMode string   // -captcha-mode
-	MTU         int      // 0 = default 1380
+	MTU         int      // 0 = default 1300
 }
 
 // EventType — тип события от ядра.

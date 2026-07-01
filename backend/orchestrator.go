@@ -305,6 +305,7 @@ func (o *Orchestrator) forwardEvents(sess *coreSession) {
 		case core.EventEvent:
 			if ev.Name == "wg_config" {
 				turnIPs := sess.c.GetTurnIPs()
+				runtime.EventsEmit(o.appCtx, "log", "INFO", "[WG] Применение конфига...")
 				if err := applyWGConfig(ev.Data, turnIPs); err != nil {
 					msg := fmt.Sprintf("[WG] Ошибка применения конфига: %v", err)
 					runtime.EventsEmit(o.appCtx, "error", msg)

@@ -7,7 +7,7 @@ import (
 
 func patchWGConfig(raw string, mtu int) string {
 	if mtu <= 0 {
-		mtu = 1380
+		mtu = 1300
 	}
 	mtuLine := fmt.Sprintf("MTU = %d", mtu)
 	lines := strings.Split(raw, "\n")

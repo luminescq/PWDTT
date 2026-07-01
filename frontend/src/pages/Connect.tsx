@@ -62,6 +62,7 @@ import { tunnelStore } from '../lib/stores/tunnelStore';
 import { settingsStore } from '../lib/store';
 import { themeStore } from '../lib/stores/themeStore';
 import { toastStore } from '../lib/stores/toastStore';
+import { logStore } from '../lib/stores/logStore';
 import { wdttLinkStore } from '../lib/utils/wdttLink';
 import { SaveProfile } from '../../wailsjs/go/backend/App';
 import type { Server, TunnelState } from '../lib/types';
@@ -202,6 +203,7 @@ export default function Connect() {
       return;
     }
     tunnelStore.set('connecting');
+    logStore.clear();
     try {
       const workers = s.useGlobalHashes
         ? (s.power || 9)
@@ -210,7 +212,7 @@ export default function Connect() {
         profile: cur.name,
         captchaMode: 'auto',
         workers,
-        mtu: s.mtu || 1380,
+        mtu: s.mtu || 1300,
         hashes,
       });
     } catch {

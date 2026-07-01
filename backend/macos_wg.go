@@ -40,7 +40,7 @@ func applyWGConfig(conf string, turnIPs []string) error {
 		return fmt.Errorf("Address not found in wg config")
 	}
 
-	mtu := 1380
+	mtu := 1300
 	if mtuStr != "" {
 		fmt.Sscanf(mtuStr, "%d", &mtu)
 	}

@@ -13,7 +13,7 @@ interface Props {
 export default function Settings({ onClose }: Props) {
   const [settings, setSettings] = useState<AppSettings>(() => settingsStore.get());
   const [hashOpen, setHashOpen] = useState(false);
-  const [mtuRaw, setMtuRaw] = useState(String(settingsStore.get().mtu ?? 1280));
+  const [mtuRaw, setMtuRaw] = useState(String(settingsStore.get().mtu ?? 1300));
   const mtuValid = (() => { const n = Number(mtuRaw); return Number.isInteger(n) && n >= 576 && n <= 1500; })();
   const [tunnelState, setTunnelState] = useState(() => tunnelStore.get());
   useEffect(() => tunnelStore.subscribe(setTunnelState), []);
@@ -178,7 +178,7 @@ export default function Settings({ onClose }: Props) {
                 onChange={e => setMtuRaw(e.target.value)}
                 onBlur={() => {
                   const n = Number(mtuRaw);
-                  const clamped = Number.isFinite(n) ? Math.max(576, Math.min(1500, Math.round(n))) : 1280;
+                  const clamped = Number.isFinite(n) ? Math.max(576, Math.min(1500, Math.round(n))) : 1300;
                   setMtuRaw(String(clamped));
                   update('mtu', clamped);
                 }}

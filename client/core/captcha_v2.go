@@ -27,7 +27,7 @@ import (
 
 const (
 	captchaV2APIVersion    = "5.131"
-	captchaV2ScriptVersion = "1.1.1324"
+	captchaV2ScriptVersion = "1.1.1367"
 	captchaV2DeviceInfo    = `{"screenWidth":1920,"screenHeight":1080,"screenAvailWidth":1920,"screenAvailHeight":1080,"innerWidth":1920,"innerHeight":951,"devicePixelRatio":1,"language":"en-US","languages":["en-US","en"],"webdriver":false,"hardwareConcurrency":8,"notificationsPermission":"denied"}`
 )
 
@@ -604,16 +604,43 @@ type VkCaptchaError struct {
 	ErrorCode      int
 	ErrorMsg       string
 	CaptchaSid     string
+	CaptchaImg     string
 	RedirectURI    string
 	SessionToken   string
 	CaptchaTs      string
 	CaptchaAttempt string
 }
 
+func (e *VkCaptchaError) Error() string {
+	if e == nil {
+		return "VK captcha required"
+	}
+	if e.ErrorCode != 0 && e.ErrorCode != 14 {
+		if e.ErrorMsg != "" {
+			return fmt.Sprintf("VK API error %d: %s", e.ErrorCode, e.ErrorMsg)
+		}
+		return fmt.Sprintf("VK API error %d", e.ErrorCode)
+	}
+	if e.RedirectURI != "" {
+		return fmt.Sprintf("VK captcha required: redirect_uri, sid=%q", e.CaptchaSid)
+	}
+	if e.CaptchaImg != "" {
+		return fmt.Sprintf("VK captcha required: captcha_img, sid=%q", e.CaptchaSid)
+	}
+	if e.CaptchaSid != "" {
+		return fmt.Sprintf("VK captcha required: sid=%q", e.CaptchaSid)
+	}
+	if e.ErrorMsg != "" {
+		return fmt.Sprintf("VK captcha required: %s", e.ErrorMsg)
+	}
+	return "VK captcha required"
+}
+
 func parseVkCaptchaError(errData map[string]interface{}) *VkCaptchaError {
 	codeFloat, _ := errData["error_code"].(float64)
 	redirectUri, _ := errData["redirect_uri"].(string)
 	errorMsg, _ := errData["error_msg"].(string)
+	captchaImg, _ := errData["captcha_img"].(string)
 
 	captchaSid, _ := errData["captcha_sid"].(string)
 	if captchaSid == "" {
@@ -647,6 +674,7 @@ func parseVkCaptchaError(errData map[string]interface{}) *VkCaptchaError {
 		ErrorCode:      int(codeFloat),
 		ErrorMsg:       errorMsg,
 		CaptchaSid:     captchaSid,
+		CaptchaImg:     captchaImg,
 		RedirectURI:    redirectUri,
 		SessionToken:   sessionToken,
 		CaptchaTs:      captchaTs,

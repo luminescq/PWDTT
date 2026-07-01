@@ -55,7 +55,7 @@ func TestParseWGConfig_QuickOnlyFieldsStripped(t *testing.T) {
 	input := `[Interface]
 Address = 10.0.0.2/32
 DNS = 8.8.8.8
-MTU = 1280
+MTU = 1300
 PreUp = echo start
 PostUp = echo up
 PreDown = echo down
@@ -130,7 +130,7 @@ func TestParseWGConfig_SingleAllowedIP(t *testing.T) {
 func TestParseWGConfig_CaseInsensitiveKeys(t *testing.T) {
 	input := `
 address = 10.0.0.5/32
-MTU = 1380
+MTU = 1300
 allowedips = 0.0.0.0/0
 `
 	addr, mtu, allowedIPs, _ := parseWGConfig(input)
@@ -138,8 +138,8 @@ allowedips = 0.0.0.0/0
 	if addr != "10.0.0.5/32" {
 		t.Errorf("addr = %q, want %q", addr, "10.0.0.5/32")
 	}
-	if mtu != "1380" {
-		t.Errorf("mtu = %q, want %q", mtu, "1380")
+	if mtu != "1300" {
+		t.Errorf("mtu = %q, want %q", mtu, "1300")
 	}
 	if len(allowedIPs) != 1 || allowedIPs[0] != "0.0.0.0/0" {
 		t.Errorf("allowedIPs = %v, want [0.0.0.0/0]", allowedIPs)
