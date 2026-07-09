@@ -168,6 +168,8 @@ func (a *App) SaveProfile(name string, p ProfileData) error {
 		enc, err := a.Encrypt(p.Password)
 		if err == nil {
 			p.Password = "enc:" + enc
+		} else {
+			fmt.Fprintf(os.Stderr, "WARN: SaveProfile(%q) encryption failed: %v\n", name, err)
 		}
 	}
 	data, err := json.Marshal(p)

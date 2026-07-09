@@ -278,16 +278,17 @@ func RunSession(
 		return false, fmt.Errorf("генерация сертификата: %w", err)
 	}
 
-	// Rate limit: reject if too many attempts in window
-	if !handshakeRateAllow() {
-		return false, fmt.Errorf("слишком много попыток подключения, подождите")
-	}
-
-	// Acquire handshake semaphore
+	// Acquire handshake semaphore FIRST
 	select {
 	case handshakeSem <- struct{}{}:
 	case <-sessCtx.Done():
 		return false, sessCtx.Err()
+	}
+
+	// Rate limit: reject if too many attempts in window
+	if !handshakeRateAllow() {
+		<-handshakeSem
+		return false, fmt.Errorf("слишком много попыток подключения, подождите")
 	}
 
 	dtlsCfg := &dtls.Config{
