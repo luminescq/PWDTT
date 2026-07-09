@@ -31,7 +31,7 @@ async function decryptPassword(pw: string): Promise<string> {
   try {
     return await Decrypt(pw.slice(ENC_PREFIX.length));
   } catch {
-    return pw;
+    return '';
   }
 }
 

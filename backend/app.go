@@ -30,9 +30,18 @@ type App struct {
 
 func NewApp(trayIcon []byte) *App {
 	a := &App{trayIcon: trayIcon}
-	_, err := rand.Read(a.encKey[:])
+	keyPath := filepath.Join(configDir(), "encryption.key")
+	data, err := os.ReadFile(keyPath)
 	if err != nil {
-		panic(fmt.Sprintf("encryption key generation: %v", err))
+		_, err := rand.Read(a.encKey[:])
+		if err != nil {
+			panic(fmt.Sprintf("encryption key generation: %v", err))
+		}
+		if err := os.MkdirAll(configDir(), 0o755); err == nil {
+			_ = os.WriteFile(keyPath, a.encKey[:], 0o600)
+		}
+	} else {
+		copy(a.encKey[:], data[:32])
 	}
 	return a
 }
