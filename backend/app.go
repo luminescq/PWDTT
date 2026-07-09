@@ -164,6 +164,12 @@ func (a *App) SaveProfile(name string, p ProfileData) error {
 			p.DeviceID = uuid.New().String()
 		}
 	}
+	if p.Password != "" && !strings.HasPrefix(p.Password, "enc:") {
+		enc, err := a.Encrypt(p.Password)
+		if err == nil {
+			p.Password = "enc:" + enc
+		}
+	}
 	data, err := json.Marshal(p)
 	if err != nil {
 		return err

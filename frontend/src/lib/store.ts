@@ -76,6 +76,13 @@ export async function migrateStores(): Promise<void> {
   }
 }
 
+let saveQueue = Promise.resolve();
+function seq<T>(fn: () => Promise<T>): Promise<T> {
+  const task = saveQueue.then(fn, fn);
+  saveQueue = task.then(() => {}, () => {});
+  return task;
+}
+
 export const serverStore = {
   getAll: async (): Promise<Server[]> => {
     const servers = parse<Server[]>(SERVERS_KEY, []);
@@ -93,17 +100,23 @@ export const serverStore = {
   },
   add: async (server: Omit<Server, 'id'>): Promise<Server> => {
     const s: Server = { ...server, id: crypto.randomUUID() };
-    const all = await serverStore.getAll();
-    await serverStore.save([...all, s]);
+    await seq(async () => {
+      const all = await serverStore.getAll();
+      await serverStore.save([...all, s]);
+    });
     return s;
   },
   update: async (server: Server) => {
-    const all = await serverStore.getAll();
-    await serverStore.save(all.map(s => s.id === server.id ? server : s));
+    await seq(async () => {
+      const all = await serverStore.getAll();
+      await serverStore.save(all.map(s => s.id === server.id ? server : s));
+    });
   },
   remove: async (id: string) => {
-    const all = await serverStore.getAll();
-    await serverStore.save(all.filter(s => s.id !== id));
+    await seq(async () => {
+      const all = await serverStore.getAll();
+      await serverStore.save(all.filter(s => s.id !== id));
+    });
   },
   getLastSelectedId: (): string | null => parse<string | null>(LAST_SERVER_KEY, null),
   setLastSelectedId: (id: string | null) => {

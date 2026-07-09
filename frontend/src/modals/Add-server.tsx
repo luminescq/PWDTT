@@ -34,9 +34,10 @@ export default function AddServer({ onClose, onAdd }: Props) {
     const hashes = parsed?.hashes ?? [];
 
     try {
+      const encPw = password ? 'enc:' + (await Encrypt(password)) : '';
       await SaveProfile(name.trim(), {
         peer: host,
-        password,
+        password: encPw,
         hashes,
         turn: '', port: '', device_id: '', listen: '',
       });
