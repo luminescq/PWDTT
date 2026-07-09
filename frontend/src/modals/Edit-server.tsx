@@ -4,7 +4,7 @@ import { IconCircleHalf2, IconInfoCircle, IconHash, IconEye, IconEyeOff, IconX }
 import type { Server } from '../lib/types';
 import { settingsStore } from '../lib/store';
 import Hash from './Hash';
-import { SaveProfile, DeleteProfile } from '../../wailsjs/go/backend/App';
+import { SaveProfile, DeleteProfile, Encrypt } from '../../wailsjs/go/backend/App';
 
 interface Props {
   server: Server;
@@ -53,9 +53,10 @@ export default function EditServer({ server, onClose, onSave, onDelete }: Props)
     if (server.name !== updated.name) {
       await DeleteProfile(server.name).catch(() => {});
     }
+    const encPassword = updated.password ? 'enc:' + (await Encrypt(updated.password)) : '';
     await SaveProfile(updated.name, {
       peer: updated.host,
-      password: updated.password,
+      password: encPassword,
       hashes,
       turn: '', port: '', device_id: '', listen: '',
     }).catch(() => {});

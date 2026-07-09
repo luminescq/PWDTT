@@ -32,16 +32,18 @@ func NewApp(trayIcon []byte) *App {
 	a := &App{trayIcon: trayIcon}
 	keyPath := filepath.Join(configDir(), "encryption.key")
 	data, err := os.ReadFile(keyPath)
-	if err != nil {
+	if err != nil || len(data) != 32 {
 		_, err := rand.Read(a.encKey[:])
 		if err != nil {
 			panic(fmt.Sprintf("encryption key generation: %v", err))
 		}
 		if err := os.MkdirAll(configDir(), 0o755); err == nil {
-			_ = os.WriteFile(keyPath, a.encKey[:], 0o600)
+			if werr := os.WriteFile(keyPath, a.encKey[:], 0o600); werr != nil {
+				fmt.Fprintf(os.Stderr, "WARN: failed to persist encryption key: %v\n", werr)
+			}
 		}
 	} else {
-		copy(a.encKey[:], data[:32])
+		copy(a.encKey[:], data)
 	}
 	return a
 }

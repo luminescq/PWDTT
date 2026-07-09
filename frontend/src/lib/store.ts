@@ -21,7 +21,8 @@ async function encryptPassword(pw: string): Promise<string> {
   if (!pw || pw.startsWith(ENC_PREFIX)) return pw;
   try {
     return ENC_PREFIX + (await Encrypt(pw));
-  } catch {
+  } catch (e) {
+    console.error('[CRYPTO] Encrypt failed, password stored unencrypted:', e);
     return pw;
   }
 }
@@ -30,8 +31,48 @@ async function decryptPassword(pw: string): Promise<string> {
   if (!pw || !pw.startsWith(ENC_PREFIX)) return pw;
   try {
     return await Decrypt(pw.slice(ENC_PREFIX.length));
-  } catch {
+  } catch (e) {
+    console.error('[CRYPTO] Decrypt failed, returning empty password:', e);
     return '';
+  }
+}
+
+export async function migrateStores(): Promise<void> {
+  // Servers
+  const rawSrv = localStorage.getItem(SERVERS_KEY);
+  if (rawSrv) {
+    const servers: Server[] = JSON.parse(rawSrv);
+    let changed = false;
+    for (const s of servers) {
+      if (s.password && !s.password.startsWith(ENC_PREFIX)) {
+        try {
+          s.password = ENC_PREFIX + (await Encrypt(s.password));
+          changed = true;
+        } catch (e) {
+          console.error('[CRYPTO] migrate servers failed:', e);
+        }
+      }
+    }
+    if (changed) localStorage.setItem(SERVERS_KEY, JSON.stringify(servers));
+  }
+  // Deploy
+  const rawDep = localStorage.getItem(DEPLOY_KEY);
+  if (rawDep) {
+    const cfg: DeployConfig = JSON.parse(rawDep);
+    let changed = false;
+    const fields: (keyof DeployConfig)[] = ['password', 'tunnelPassword', 'tgBotToken'];
+    for (const k of fields) {
+      const v = cfg[k] as string;
+      if (v && !v.startsWith(ENC_PREFIX)) {
+        try {
+          (cfg as any)[k] = ENC_PREFIX + (await Encrypt(v));
+          changed = true;
+        } catch (e) {
+          console.error(`[CRYPTO] migrate deploy.${k} failed:`, e);
+        }
+      }
+    }
+    if (changed) localStorage.setItem(DEPLOY_KEY, JSON.stringify(cfg));
   }
 }
 

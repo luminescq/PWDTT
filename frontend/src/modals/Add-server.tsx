@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { IconCircleHalf2, IconEye, IconEyeOff, IconX } from '@tabler/icons-react';
 import type { Server } from '../lib/types';
-import { SaveProfile } from '../../wailsjs/go/backend/App';
+import { SaveProfile, Encrypt } from '../../wailsjs/go/backend/App';
 import { parseWdttUrl } from '../lib/utils/wdttLink';
 
 interface Props {
