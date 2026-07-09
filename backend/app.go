@@ -2,7 +2,13 @@ package backend
 
 import (
 	"context"
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
+	"fmt"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
@@ -19,9 +25,17 @@ type App struct {
 	trayEnabled atomic.Bool
 	quitting    atomic.Bool
 	trayIcon    []byte
+	encKey      [32]byte
 }
 
-func NewApp(trayIcon []byte) *App { return &App{trayIcon: trayIcon} }
+func NewApp(trayIcon []byte) *App {
+	a := &App{trayIcon: trayIcon}
+	_, err := rand.Read(a.encKey[:])
+	if err != nil {
+		panic(fmt.Sprintf("encryption key generation: %v", err))
+	}
+	return a
+}
 
 func (a *App) Startup(ctx context.Context) {
 	a.ctx = ctx
@@ -41,6 +55,48 @@ func (a *App) Startup(ctx context.Context) {
 
 func (a *App) updateTray(connected bool, rx, tx int64, workers int32) {
 	setTrayStatus(connected, rx, tx, workers)
+}
+
+func (a *App) Encrypt(plaintext string) (string, error) {
+	block, err := aes.NewCipher(a.encKey[:])
+	if err != nil {
+		return "", err
+	}
+	aead, err := cipher.NewGCM(block)
+	if err != nil {
+		return "", err
+	}
+	nonce := make([]byte, aead.NonceSize())
+	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
+		return "", err
+	}
+	ciphertext := aead.Seal(nil, nonce, []byte(plaintext), nil)
+	return base64.StdEncoding.EncodeToString(append(nonce, ciphertext...)), nil
+}
+
+func (a *App) Decrypt(encoded string) (string, error) {
+	data, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil {
+		return "", err
+	}
+	block, err := aes.NewCipher(a.encKey[:])
+	if err != nil {
+		return "", err
+	}
+	aead, err := cipher.NewGCM(block)
+	if err != nil {
+		return "", err
+	}
+	nonceSize := aead.NonceSize()
+	if len(data) < nonceSize {
+		return "", fmt.Errorf("ciphertext too short")
+	}
+	nonce, ciphertext := data[:nonceSize], data[nonceSize:]
+	plaintext, err := aead.Open(nil, nonce, ciphertext, nil)
+	if err != nil {
+		return "", err
+	}
+	return string(plaintext), nil
 }
 
 // OnBeforeClose hides the window instead of quitting when tray is enabled.

@@ -30,6 +30,30 @@ const (
 // Handshake semaphore: limit to 3 concurrent DTLS handshakes
 var handshakeSem = make(chan struct{}, 3)
 
+// Rate limiter: max 5 handshake attempts per 60s window
+var (
+	handshakeLimitMu sync.Mutex
+	handshakeCount   int
+	handshakeReset   = time.Now()
+	handshakeMax     = 5
+	handshakeWindow  = 60 * time.Second
+)
+
+func handshakeRateAllow() bool {
+	handshakeLimitMu.Lock()
+	defer handshakeLimitMu.Unlock()
+	now := time.Now()
+	if now.Sub(handshakeReset) > handshakeWindow {
+		handshakeCount = 0
+		handshakeReset = now
+	}
+	if handshakeCount >= handshakeMax {
+		return false
+	}
+	handshakeCount++
+	return true
+}
+
 // NullLoggerFactory подавляет логи pion
 type NullLoggerFactory struct{}
 
@@ -252,6 +276,11 @@ func RunSession(
 	cert, err := selfsign.GenerateSelfSigned()
 	if err != nil {
 		return false, fmt.Errorf("генерация сертификата: %w", err)
+	}
+
+	// Rate limit: reject if too many attempts in window
+	if !handshakeRateAllow() {
+		return false, fmt.Errorf("слишком много попыток подключения, подождите")
 	}
 
 	// Acquire handshake semaphore

@@ -6,7 +6,7 @@ import { parseWdttUrl } from '../lib/utils/wdttLink';
 
 interface Props {
   onClose: () => void;
-  onAdd: (server: Omit<Server, 'id'>) => void;
+  onAdd: (server: Omit<Server, 'id'>) => Promise<void>;
 }
 
 export default function AddServer({ onClose, onAdd }: Props) {
@@ -45,7 +45,7 @@ export default function AddServer({ onClose, onAdd }: Props) {
     }
 
     const h4: [string,string,string,string] = [hashes[0]??'', hashes[1]??'', hashes[2]??'', hashes[3]??''];
-    onAdd({ name: name.trim(), host, password, hashes: h4 });
+    await onAdd({ name: name.trim(), host, password, hashes: h4 });
     onClose();
   };
 

@@ -9,8 +9,8 @@ import { SaveProfile, DeleteProfile } from '../../wailsjs/go/backend/App';
 interface Props {
   server: Server;
   onClose: () => void;
-  onSave: (server: Server) => void;
-  onDelete: (id: string) => void;
+  onSave: (server: Server) => Promise<void>;
+  onDelete: (id: string) => Promise<void>;
 }
 
 export default function EditServer({ server, onClose, onSave, onDelete }: Props) {
@@ -59,13 +59,13 @@ export default function EditServer({ server, onClose, onSave, onDelete }: Props)
       hashes,
       turn: '', port: '', device_id: '', listen: '',
     }).catch(() => {});
-    onSave(updated);
+    await onSave(updated);
     onClose();
   };
 
   const handleDelete = async () => {
     await DeleteProfile(server.name).catch(() => {});
-    onDelete(server.id);
+    await onDelete(server.id);
     onClose();
   };
 

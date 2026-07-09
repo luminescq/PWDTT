@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { IconLockPassword, IconServer2, IconServerOff, IconEye, IconEyeOff, IconX } from '@tabler/icons-react';
 import Secrets from './Secrets';
 import { deployStore } from '../lib/store';
+import { DEFAULT_DEPLOY } from '../lib/types';
 import type { DeployConfig, DeployState } from '../lib/types';
 import { Deploy as WailsDeploy, Undeploy as WailsUndeploy } from '../../wailsjs/go/backend/App';
 import { EventsOn } from '../../wailsjs/runtime/runtime';
@@ -11,12 +12,16 @@ interface Props {
 }
 
 export default function Deploy({ onClose }: Props) {
-  const [cfg, setCfg] = useState<DeployConfig>(() => deployStore.get());
+  const [cfg, setCfg] = useState<DeployConfig>({ ...DEFAULT_DEPLOY });
   const [secretsOpen, setSecretsOpen] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [deployState, setDeployState] = useState<DeployState>('idle');
   const [logs, setLogs] = useState<string[]>([]);
   const logRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    deployStore.get().then(setCfg);
+  }, []);
 
   const set = <K extends keyof DeployConfig>(k: K, v: DeployConfig[K]) => {
     const next = { ...cfg, [k]: v };

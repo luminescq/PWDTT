@@ -1,9 +1,12 @@
 import type { Server, AppSettings, DeployConfig } from './types';
 import { DEFAULT_SETTINGS, DEFAULT_DEPLOY } from './types';
+import { Encrypt, Decrypt } from '../../wailsjs/go/backend/App';
 
 const SERVERS_KEY = 'wdtt_servers';
 const SETTINGS_KEY = 'wdtt_settings';
 const LAST_SERVER_KEY = 'wdtt_last_server';
+const ENC_PREFIX = 'enc:';
+const DEPLOY_KEY = 'wdtt_deploy';
 
 function parse<T>(key: string, fallback: T): T {
   try {
@@ -14,20 +17,52 @@ function parse<T>(key: string, fallback: T): T {
   }
 }
 
+async function encryptPassword(pw: string): Promise<string> {
+  if (!pw || pw.startsWith(ENC_PREFIX)) return pw;
+  try {
+    return ENC_PREFIX + (await Encrypt(pw));
+  } catch {
+    return pw;
+  }
+}
+
+async function decryptPassword(pw: string): Promise<string> {
+  if (!pw || !pw.startsWith(ENC_PREFIX)) return pw;
+  try {
+    return await Decrypt(pw.slice(ENC_PREFIX.length));
+  } catch {
+    return pw;
+  }
+}
+
 export const serverStore = {
-  getAll: (): Server[] => parse<Server[]>(SERVERS_KEY, []),
-  save: (servers: Server[]) => localStorage.setItem(SERVERS_KEY, JSON.stringify(servers)),
-  add: (server: Omit<Server, 'id'>): Server => {
+  getAll: async (): Promise<Server[]> => {
+    const servers = parse<Server[]>(SERVERS_KEY, []);
+    return Promise.all(servers.map(async s => ({
+      ...s,
+      password: await decryptPassword(s.password),
+    })));
+  },
+  save: async (servers: Server[]) => {
+    const encrypted = await Promise.all(servers.map(async s => ({
+      ...s,
+      password: await encryptPassword(s.password),
+    })));
+    localStorage.setItem(SERVERS_KEY, JSON.stringify(encrypted));
+  },
+  add: async (server: Omit<Server, 'id'>): Promise<Server> => {
     const s: Server = { ...server, id: crypto.randomUUID() };
-    const all = serverStore.getAll();
-    serverStore.save([...all, s]);
+    const all = await serverStore.getAll();
+    await serverStore.save([...all, s]);
     return s;
   },
-  update: (server: Server) => {
-    serverStore.save(serverStore.getAll().map(s => s.id === server.id ? server : s));
+  update: async (server: Server) => {
+    const all = await serverStore.getAll();
+    await serverStore.save(all.map(s => s.id === server.id ? server : s));
   },
-  remove: (id: string) => {
-    serverStore.save(serverStore.getAll().filter(s => s.id !== id));
+  remove: async (id: string) => {
+    const all = await serverStore.getAll();
+    await serverStore.save(all.filter(s => s.id !== id));
   },
   getLastSelectedId: (): string | null => parse<string | null>(LAST_SERVER_KEY, null),
   setLastSelectedId: (id: string | null) => {
@@ -40,7 +75,6 @@ export const settingsStore = {
   get: (): AppSettings => {
     const saved = parse<Partial<AppSettings>>(SETTINGS_KEY, {});
     const merged = { ...DEFAULT_SETTINGS, ...saved };
-    // ensure hashes is always exactly 4 strings
     const h = Array.isArray(merged.hashes) ? merged.hashes : [];
     merged.hashes = [h[0] ?? '', h[1] ?? '', h[2] ?? '', h[3] ?? ''];
     return merged;
@@ -48,9 +82,23 @@ export const settingsStore = {
   save: (settings: AppSettings) => localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)),
 };
 
-const DEPLOY_KEY = 'wdtt_deploy';
-
 export const deployStore = {
-  get: (): DeployConfig => parse<DeployConfig>(DEPLOY_KEY, DEFAULT_DEPLOY),
-  save: (cfg: DeployConfig) => localStorage.setItem(DEPLOY_KEY, JSON.stringify(cfg)),
+  get: async (): Promise<DeployConfig> => {
+    const cfg = parse<DeployConfig>(DEPLOY_KEY, DEFAULT_DEPLOY);
+    return {
+      ...cfg,
+      password: await decryptPassword(cfg.password),
+      tunnelPassword: await decryptPassword(cfg.tunnelPassword),
+      tgBotToken: cfg.tgBotToken ? await decryptPassword(cfg.tgBotToken) : '',
+    };
+  },
+  save: async (cfg: DeployConfig) => {
+    const encrypted: DeployConfig = {
+      ...cfg,
+      password: await encryptPassword(cfg.password),
+      tunnelPassword: await encryptPassword(cfg.tunnelPassword),
+      tgBotToken: cfg.tgBotToken ? await encryptPassword(cfg.tgBotToken) : '',
+    };
+    localStorage.setItem(DEPLOY_KEY, JSON.stringify(encrypted));
+  },
 };
