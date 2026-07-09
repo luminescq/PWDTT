@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { IconCodeAsterisk, IconRestore, IconX } from '@tabler/icons-react';
 import { deployStore } from '../lib/store';
+import { DEFAULT_DEPLOY } from '../lib/types';
 import type { DeployConfig } from '../lib/types';
 
 interface Props {
@@ -10,7 +11,11 @@ interface Props {
 }
 
 export default function Secrets({ onClose, onSave, showPorts }: Props) {
-  const [cfg, setCfg] = useState<DeployConfig>(() => deployStore.get());
+  const [cfg, setCfg] = useState<DeployConfig>({ ...DEFAULT_DEPLOY });
+
+  useEffect(() => {
+    deployStore.get().then(setCfg);
+  }, []);
 
   const set = <K extends keyof DeployConfig>(k: K, v: DeployConfig[K]) =>
     setCfg(c => ({ ...c, [k]: v }));
@@ -20,8 +25,8 @@ export default function Secrets({ onClose, onSave, showPorts }: Props) {
     set('tunnelPassword', Array.from({ length: 16 }, () => chars[Math.floor(Math.random() * chars.length)]).join(''));
   };
 
-  const handleSave = () => {
-    deployStore.save(cfg);
+  const handleSave = async () => {
+    await deployStore.save(cfg);
     onSave(cfg);
     onClose();
   };

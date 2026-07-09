@@ -1,12 +1,12 @@
 import { useState } from 'react';
 import { IconCircleHalf2, IconEye, IconEyeOff, IconX } from '@tabler/icons-react';
 import type { Server } from '../lib/types';
-import { SaveProfile } from '../../wailsjs/go/backend/App';
+import { SaveProfile, Encrypt } from '../../wailsjs/go/backend/App';
 import { parseWdttUrl } from '../lib/utils/wdttLink';
 
 interface Props {
   onClose: () => void;
-  onAdd: (server: Omit<Server, 'id'>) => void;
+  onAdd: (server: Omit<Server, 'id'>) => Promise<void>;
 }
 
 export default function AddServer({ onClose, onAdd }: Props) {
@@ -34,9 +34,10 @@ export default function AddServer({ onClose, onAdd }: Props) {
     const hashes = parsed?.hashes ?? [];
 
     try {
+      const encPw = password ? 'enc:' + (await Encrypt(password)) : '';
       await SaveProfile(name.trim(), {
         peer: host,
-        password,
+        password: encPw,
         hashes,
         turn: '', port: '', device_id: '', listen: '',
       });
@@ -45,7 +46,7 @@ export default function AddServer({ onClose, onAdd }: Props) {
     }
 
     const h4: [string,string,string,string] = [hashes[0]??'', hashes[1]??'', hashes[2]??'', hashes[3]??''];
-    onAdd({ name: name.trim(), host, password, hashes: h4 });
+    await onAdd({ name: name.trim(), host, password, hashes: h4 });
     onClose();
   };
 

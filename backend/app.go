@@ -2,7 +2,13 @@ package backend
 
 import (
 	"context"
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
+	"fmt"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
@@ -19,9 +25,28 @@ type App struct {
 	trayEnabled atomic.Bool
 	quitting    atomic.Bool
 	trayIcon    []byte
+	encKey      [32]byte
 }
 
-func NewApp(trayIcon []byte) *App { return &App{trayIcon: trayIcon} }
+func NewApp(trayIcon []byte) *App {
+	a := &App{trayIcon: trayIcon}
+	keyPath := filepath.Join(configDir(), "encryption.key")
+	data, err := os.ReadFile(keyPath)
+	if err != nil || len(data) != 32 {
+		_, err := rand.Read(a.encKey[:])
+		if err != nil {
+			panic(fmt.Sprintf("encryption key generation: %v", err))
+		}
+		if err := os.MkdirAll(configDir(), 0o755); err == nil {
+			if werr := os.WriteFile(keyPath, a.encKey[:], 0o600); werr != nil {
+				fmt.Fprintf(os.Stderr, "WARN: failed to persist encryption key: %v\n", werr)
+			}
+		}
+	} else {
+		copy(a.encKey[:], data)
+	}
+	return a
+}
 
 func (a *App) Startup(ctx context.Context) {
 	a.ctx = ctx
@@ -41,6 +66,48 @@ func (a *App) Startup(ctx context.Context) {
 
 func (a *App) updateTray(connected bool, rx, tx int64, workers int32) {
 	setTrayStatus(connected, rx, tx, workers)
+}
+
+func (a *App) Encrypt(plaintext string) (string, error) {
+	block, err := aes.NewCipher(a.encKey[:])
+	if err != nil {
+		return "", err
+	}
+	aead, err := cipher.NewGCM(block)
+	if err != nil {
+		return "", err
+	}
+	nonce := make([]byte, aead.NonceSize())
+	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
+		return "", err
+	}
+	ciphertext := aead.Seal(nil, nonce, []byte(plaintext), nil)
+	return base64.StdEncoding.EncodeToString(append(nonce, ciphertext...)), nil
+}
+
+func (a *App) Decrypt(encoded string) (string, error) {
+	data, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil {
+		return "", err
+	}
+	block, err := aes.NewCipher(a.encKey[:])
+	if err != nil {
+		return "", err
+	}
+	aead, err := cipher.NewGCM(block)
+	if err != nil {
+		return "", err
+	}
+	nonceSize := aead.NonceSize()
+	if len(data) < nonceSize {
+		return "", fmt.Errorf("ciphertext too short")
+	}
+	nonce, ciphertext := data[:nonceSize], data[nonceSize:]
+	plaintext, err := aead.Open(nil, nonce, ciphertext, nil)
+	if err != nil {
+		return "", err
+	}
+	return string(plaintext), nil
 }
 
 // OnBeforeClose hides the window instead of quitting when tray is enabled.
@@ -95,6 +162,14 @@ func (a *App) SaveProfile(name string, p ProfileData) error {
 			p.DeviceID = existing.DeviceID
 		} else {
 			p.DeviceID = uuid.New().String()
+		}
+	}
+	if p.Password != "" && !strings.HasPrefix(p.Password, "enc:") {
+		enc, err := a.Encrypt(p.Password)
+		if err == nil {
+			p.Password = "enc:" + enc
+		} else {
+			fmt.Fprintf(os.Stderr, "WARN: SaveProfile(%q) encryption failed: %v\n", name, err)
 		}
 	}
 	data, err := json.Marshal(p)

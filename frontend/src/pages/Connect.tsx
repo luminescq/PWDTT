@@ -64,9 +64,10 @@ import { themeStore } from '../lib/stores/themeStore';
 import { toastStore } from '../lib/stores/toastStore';
 import { logStore } from '../lib/stores/logStore';
 import { wdttLinkStore } from '../lib/utils/wdttLink';
-import { SaveProfile } from '../../wailsjs/go/backend/App';
+import { SaveProfile, Encrypt, Decrypt } from '../../wailsjs/go/backend/App';
 import type { Server, TunnelState } from '../lib/types';
 import { Connect as WailsConnect, Disconnect as WailsDisconnect, ListProfiles } from '../../wailsjs/go/backend/App';
+import { migrateStores } from '../lib/store';
 import shapeLight from '../assets/shape-light.png';
 import shapeDark from '../assets/shape-dark.png';
 import powerIcon from '../assets/power-icon.png';
@@ -93,35 +94,70 @@ const TUNNEL_LABEL: Record<TunnelState, string> = {
 };
 
 export default function Connect() {
-  const [servers, setServers] = useState<Server[]>(() => serverStore.getAll());
-  const [selected, setSelected] = useState<Server | null>(() => {
-    const all = serverStore.getAll();
-    if (all.length === 0) return null;
-    const lastId = serverStore.getLastSelectedId();
-    return all.find(s => s.id === lastId) ?? all[0];
-  });
+  const [servers, setServers] = useState<Server[]>([]);
+  const [selected, setSelected] = useState<Server | null>(null);
   const [listOpen, setListOpen] = useState(false);
 
   useEffect(() => {
-    ListProfiles().then(profiles => {
-      if (!profiles) return;
-      const existing = serverStore.getAll();
-      const existingNames = new Set(existing.map(s => s.name));
-      let changed = false;
-      for (const [name, p] of Object.entries(profiles)) {
-        if (existingNames.has(name)) continue;
-        const host = p.peer || '';
-        if (!host) continue;
-        const h4: [string,string,string,string] = [p.hashes?.[0]??'', p.hashes?.[1]??'', p.hashes?.[2]??'', p.hashes?.[3]??''];
-        serverStore.add({ name, host, password: p.password ?? '', hashes: h4 });
-        changed = true;
+    (async () => {
+      await migrateStores();
+      const all = await serverStore.getAll();
+      setServers(all);
+      if (all.length > 0) {
+        const lastId = serverStore.getLastSelectedId();
+        setSelected(all.find(s => s.id === lastId) ?? all[0]);
       }
-      if (changed) {
-        setServers(serverStore.getAll());
-        const all = serverStore.getAll();
-        if (!selected && all.length > 0) setSelected(all[0]);
-      }
-    }).catch(() => {});
+    })();
+  }, []);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const profiles = await ListProfiles();
+        if (!profiles) return;
+        let profileMigrated = false;
+        for (const [name, p] of Object.entries(profiles)) {
+          if (!p.peer || !p.password) continue;
+          // migrate plaintext profile password to encrypted
+          if (!p.password.startsWith('enc:')) {
+            try {
+              const enc = 'enc:' + (await Encrypt(p.password));
+              await SaveProfile(name, { ...p, password: enc });
+              profileMigrated = true;
+            } catch (e) {
+              console.warn('[CRYPTO] profile migration failed for', name, e);
+            }
+          }
+        }
+        if (profileMigrated) {
+          // re-read profiles after migration
+          const updated = await ListProfiles();
+          if (updated) Object.assign(profiles, updated);
+        }
+        const existing = await serverStore.getAll();
+        const existingNames = new Set(existing.map(s => s.name));
+        let changed = false;
+        for (const [name, p] of Object.entries(profiles)) {
+          if (existingNames.has(name)) continue;
+          const host = p.peer || '';
+          if (!host) continue;
+          const rawPw = p.password ?? '';
+          let password = rawPw;
+          if (rawPw.startsWith('enc:')) {
+            try { password = await Decrypt(rawPw.slice(4)); }
+            catch { password = ''; }
+          }
+          const h4: [string,string,string,string] = [p.hashes?.[0]??'', p.hashes?.[1]??'', p.hashes?.[2]??'', p.hashes?.[3]??''];
+          await serverStore.add({ name, host, password, hashes: h4 });
+          changed = true;
+        }
+        if (changed) {
+          const all = await serverStore.getAll();
+          setServers(all);
+          if (!selected && all.length > 0) setSelected(all[0]);
+        }
+      } catch {}
+    })();
   }, []);
 
   // tunnelState из глобального store — переживает смену роута
@@ -164,20 +200,22 @@ export default function Connect() {
       const applyLink = async () => {
         const h4 = consumed.hashes.slice(0, 4);
         const padded: [string,string,string,string] = [h4[0]??'', h4[1]??'', h4[2]??'', h4[3]??''];
+        const encPw = consumed.password ? 'enc:' + (await Encrypt(consumed.password)) : '';
         await SaveProfile(name, {
           peer: host,
-          password: consumed.password,
+          password: encPw,
           hashes: [],
           turn: '', port: '', device_id: '', listen: '',
         });
-        const existing = serverStore.getAll().find(s => s.host === host);
-        let s = existing ?? serverStore.add({ name, host, password: consumed.password });
+        const all = await serverStore.getAll();
+        const existing = all.find(s => s.host === host);
+        let s = existing ?? (await serverStore.add({ name, host, password: consumed.password }));
         if (consumed.hashes.length > 0) {
           const updated = { ...s, hashes: padded };
-          serverStore.update(updated);
+          await serverStore.update(updated);
           s = updated;
         }
-        setServers(serverStore.getAll());
+        setServers(await serverStore.getAll());
         setSelected({ ...s });
         setLinkFlash(true);
         setTimeout(() => setLinkFlash(false), 800);
@@ -240,22 +278,22 @@ export default function Connect() {
     }
   };
 
-  const handleAdd = (data: Omit<Server, 'id'>) => {
-    const s = serverStore.add(data);
-    setServers(serverStore.getAll());
+  const handleAdd = async (data: Omit<Server, 'id'>) => {
+    const s = await serverStore.add(data);
+    setServers(await serverStore.getAll());
     setSelected(s);
   };
 
-  const handleSave = (server: Server) => {
-    serverStore.update(server);
-    const all = serverStore.getAll();
+  const handleSave = async (server: Server) => {
+    await serverStore.update(server);
+    const all = await serverStore.getAll();
     setServers(all);
     if (selected?.id === server.id) setSelected(server);
   };
 
-  const handleDelete = (id: string) => {
-    serverStore.remove(id);
-    const all = serverStore.getAll();
+  const handleDelete = async (id: string) => {
+    await serverStore.remove(id);
+    const all = await serverStore.getAll();
     setServers(all);
     if (selected?.id === id) setSelected(all[0] ?? null);
   };
@@ -268,11 +306,11 @@ export default function Connect() {
     setIconMenu({ server, x: rect.left, y: rect.top });
   };
 
-  const handlePickIcon = (key: string) => {
+  const handlePickIcon = async (key: string) => {
     if (!iconMenu) return;
     const updated = { ...iconMenu.server, icon: key };
-    serverStore.update(updated);
-    const all = serverStore.getAll();
+    await serverStore.update(updated);
+    const all = await serverStore.getAll();
     setServers(all);
     if (selected?.id === iconMenu.server.id) setSelected(updated);
     setIconMenu(null);
