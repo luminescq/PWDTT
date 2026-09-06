@@ -44,3 +44,12 @@ func RequestConfig(conn net.Conn, localPort, deviceID, password string) (string,
 
 	return resp, nil
 }
+
+// SendAuth авторизует рабочую DTLS-сессию, которая не запрашивает WireGuard-конфиг.
+func SendAuth(conn net.Conn, deviceID, password string) error {
+	payload := fmt.Sprintf("AUTH:%s|%s", deviceID, password)
+	if _, err := conn.Write([]byte(payload)); err != nil {
+		return fmt.Errorf("отправка AUTH: %w", err)
+	}
+	return nil
+}

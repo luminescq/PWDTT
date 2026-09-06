@@ -410,6 +410,10 @@ func RunSession(
 		} else {
 			log.Printf("[ВОРКЕР #%d] Сервер ещё не выдал WireGuard-конфиг, повторим позже", sessionID)
 		}
+	} else {
+		if authErr := SendAuth(dtlsConn, deviceID, password); authErr != nil {
+			log.Printf("[ВОРКЕР #%d] Ошибка авторизации: %v", sessionID, authErr)
+		}
 	}
 
 	emitReady()
