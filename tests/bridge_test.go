@@ -3,6 +3,7 @@ package backend_test
 import (
 	"context"
 	"testing"
+	"time"
 
 	"pwdtt/backend"
 )
@@ -13,12 +14,24 @@ func newTestBridge(t *testing.T) *backend.Bridge {
 	return backend.NewBridge(context.Background(), store, func(name string, args ...any) {})
 }
 
+// stopBridge останавливает ядро и ждёт завершения forwardEvents: иначе горутина
+// удержит открытый лог-файл в TempDir, и Windows не сможет выполнить очистку.
+func stopBridge(t *testing.T, b *backend.Bridge) {
+	t.Helper()
+	b.Disconnect()
+	deadline := time.Now().Add(30 * time.Second)
+	for b.IsRunning() && time.Now().Before(deadline) {
+		time.Sleep(100 * time.Millisecond)
+	}
+}
+
 // ═══════════════════════════════════════════════════
 // Connect — ошибки
 // ═══════════════════════════════════════════════════
 
 func TestConnect_NoHashes(t *testing.T) {
 	b := newTestBridge(t)
+	defer stopBridge(t, b)
 
 	err := b.Connect(backend.ConnectParams{
 		PeerAddr: "1.2.3.4:5555",
@@ -36,6 +49,7 @@ func TestConnect_NoHashes(t *testing.T) {
 
 func TestConnect_EmptyHashes(t *testing.T) {
 	b := newTestBridge(t)
+	defer stopBridge(t, b)
 
 	err := b.Connect(backend.ConnectParams{
 		PeerAddr: "1.2.3.4:5555",
@@ -50,6 +64,7 @@ func TestConnect_EmptyHashes(t *testing.T) {
 
 func TestConnect_AlreadyRunning(t *testing.T) {
 	b := newTestBridge(t)
+	defer stopBridge(t, b)
 
 	// Первый вызов — running ставится true до core.Start()
 	// core.Start() может упасть (нет сети), тогда running сбросится в false
@@ -82,6 +97,7 @@ func TestConnect_AlreadyRunning(t *testing.T) {
 
 func TestIsRunning_InitiallyFalse(t *testing.T) {
 	b := newTestBridge(t)
+	defer stopBridge(t, b)
 	if b.IsRunning() {
 		t.Error("expected IsRunning=false for new Bridge")
 	}
@@ -93,6 +109,7 @@ func TestIsRunning_InitiallyFalse(t *testing.T) {
 
 func TestDisconnect_NoPanic(t *testing.T) {
 	b := newTestBridge(t)
+	defer stopBridge(t, b)
 
 	// Disconnect на неактивном bridge не должен паниковать
 	b.Disconnect()
@@ -106,6 +123,7 @@ func TestDisconnect_NoPanic(t *testing.T) {
 
 func TestConnect_DefaultWorkers(t *testing.T) {
 	b := newTestBridge(t)
+	defer stopBridge(t, b)
 
 	// Workers=0 → bridge поставит 24
 	err := b.Connect(backend.ConnectParams{
@@ -119,6 +137,7 @@ func TestConnect_DefaultWorkers(t *testing.T) {
 
 func TestConnect_DefaultDeviceID(t *testing.T) {
 	b := newTestBridge(t)
+	defer stopBridge(t, b)
 
 	// DeviceID="" → bridge поставит "unknown"
 	err := b.Connect(backend.ConnectParams{
@@ -136,6 +155,7 @@ func TestConnect_DefaultDeviceID(t *testing.T) {
 
 func TestConnect_AllParams(t *testing.T) {
 	b := newTestBridge(t)
+	defer stopBridge(t, b)
 
 	err := b.Connect(backend.ConnectParams{
 		PeerAddr:    "1.2.3.4:5555",

@@ -18,6 +18,7 @@ type Bridge struct {
 	core    *core.Core
 	running bool
 	logFile *LogFile // полный лог сессии
+	session uint64   // номер сессии; stale forwardEvents не должен трогать новую
 }
 
 func NewBridge(ctx context.Context, store *Store, onEvent func(string, ...any)) *Bridge {
@@ -34,6 +35,8 @@ func (b *Bridge) Connect(params ConnectParams) error {
 	}
 	// Сразу помечаем как running чтобы заблокировать параллельные вызовы
 	b.running = true
+	b.session++
+	sessID := b.session
 	b.mu.Unlock()
 
 	// resetRunning сбрасывает флаг при любой ошибке до запуска forwardEvents
@@ -68,23 +71,32 @@ func (b *Bridge) Connect(params ConnectParams) error {
 		CaptchaMode: params.CaptchaMode,
 		ObfsMode:    params.ObfsMode,
 		Fingerprint: params.Fingerprint,
+		TurnTCP:     params.TurnTCP,
 	}
 
 	c := core.New(cfg)
-	events, err := c.Start()
-	if err != nil {
-		log.Printf("[BRIDGE] core start failed: %v", err)
-		resetRunning()
-		return fmt.Errorf("core start: %w", err)
-	}
-
+	
 	b.mu.Lock()
 	b.core = c
-	b.running = true
 	b.logFile = b.store.OpenLogFile()
 	b.mu.Unlock()
 
-	go b.forwardEvents(events)
+	events, err := c.Start()
+	if err != nil {
+		log.Printf("[BRIDGE] core start failed: %v", err)
+		c.Stop() // на всякий случай гасим контекст ядра
+		b.mu.Lock()
+		b.core = nil
+		if b.logFile != nil {
+			b.logFile.Close()
+			b.logFile = nil
+		}
+		b.running = false
+		b.mu.Unlock()
+		return fmt.Errorf("core start: %w", err)
+	}
+
+	go b.forwardEvents(events, sessID)
 	return nil
 }
 
@@ -118,8 +130,18 @@ func (b *Bridge) SendCaptchaResult(token string) {
 }
 
 // forwardEvents читает канал событий ядра и пробрасывает в Wails.
-func (b *Bridge) forwardEvents(events <-chan core.Event) {
+// sessID — поколение сессии, на которую запущен этот горутин: если к моменту
+// его завершения уже начата новая сессия (быстрый Disconnect → Connect),
+// устаревший горутин не имеет права трогать состояние Bridge.
+func (b *Bridge) forwardEvents(events <-chan core.Event, sessID uint64) {
 	for ev := range events {
+		b.mu.Lock()
+		stale := b.session != sessID
+		b.mu.Unlock()
+		if stale {
+			continue // только осушаем канал, без побочных эффектов
+		}
+
 		switch ev.Type {
 		case core.EventState:
 			b.onEvent("state_changed", ev.Status)
@@ -175,13 +197,22 @@ func (b *Bridge) forwardEvents(events <-chan core.Event) {
 	}
 
 	b.mu.Lock()
-	b.running = false
-	b.core = nil
-	if b.logFile != nil {
-		b.logFile.Close()
-		b.logFile = nil
+	current := b.session == sessID
+	curSession := b.session
+	if current {
+		b.running = false
+		b.core = nil
+		if b.logFile != nil {
+			b.logFile.Close()
+			b.logFile = nil
+		}
 	}
 	b.mu.Unlock()
+
+	if !current {
+		log.Printf("[BRIDGE] Завершение устаревшей сессии проигнорировано (актуальна #%d)", curSession)
+		return
+	}
 
 	b.onEvent("state_changed", "disconnected")
 	log.Printf("[BRIDGE] Ядро завершилось")

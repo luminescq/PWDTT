@@ -22,11 +22,33 @@ describe('settingsStore', () => {
   });
 
   it('save → get: roundtrip', () => {
-    const custom = { autoStart: false, obfsMode: 'video' as const, obfsAccepted: true };
+    const custom = { autoStart: false, obfsMode: 'video' as const, obfsAccepted: true, turnTcp: false };
     settingsStore.save(custom);
+    
+    // Перезагружаем "приложение" — должны восстановиться кастомные настройки
+    expect(settingsStore.get()).toEqual(custom);
+  });
 
-    const loaded = settingsStore.get();
-    expect(loaded).toEqual(custom);
+  it('должен мержить с дефолтами, если в localStorage неполные данные', () => {
+    // Имитируем старый формат сохраненных данных, где не было obfsMode
+    localStorage.setItem('wdtt_settings:v1', JSON.stringify({ autoStart: false }));
+
+    
+    const settings = settingsStore.get();
+    expect(settings.autoStart).toBe(false); // сохраненное значение
+    expect(settings.obfsMode).toBe(DEFAULT_SETTINGS.obfsMode); // дефолтное
+    expect(settings.turnTcp).toBe(DEFAULT_SETTINGS.turnTcp);
+  });
+
+  it('должен сбрасывать obfsMode на audio, если obfsAccepted === false', () => {
+    settingsStore.save({ autoStart: false, obfsMode: 'audio', obfsAccepted: false, turnTcp: false });
+    settingsStore.save({ autoStart: true, obfsMode: 'video', obfsAccepted: true, turnTcp: false });
+
+    const settings = settingsStore.get();
+    expect(settings.autoStart).toBe(true);
+    expect(settings.obfsMode).toBe('video');
+    expect(settings.obfsAccepted).toBe(true);
+    expect(settings.turnTcp).toBe(false);
   });
 
   it('get: невалидный JSON → дефолт', () => {
@@ -42,12 +64,13 @@ describe('settingsStore', () => {
   });
 
   it('save: перезаписывает предыдущие', () => {
-    settingsStore.save({ autoStart: false, obfsMode: 'audio', obfsAccepted: false });
-    settingsStore.save({ autoStart: true, obfsMode: 'video', obfsAccepted: true });
+    settingsStore.save({ autoStart: false, obfsMode: 'audio', obfsAccepted: false, turnTcp: false });
+    settingsStore.save({ autoStart: true, obfsMode: 'video', obfsAccepted: true, turnTcp: false });
 
     const settings = settingsStore.get();
     expect(settings.autoStart).toBe(true);
     expect(settings.obfsMode).toBe('video');
     expect(settings.obfsAccepted).toBe(true);
+    expect(settings.turnTcp).toBe(false);
   });
 });

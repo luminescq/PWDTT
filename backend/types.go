@@ -10,6 +10,7 @@ type ConnectParams struct {
 	CaptchaMode string   `json:"captchaMode,omitempty"` // auto/rjs/wv
 	ObfsMode    string   `json:"obfsMode,omitempty"`   // audio/video
 	Fingerprint string   `json:"fingerprint,omitempty"` // chrome/android/ios/safari/firefox
+	TurnTCP     bool     `json:"turnTcp,omitempty"`    // использовать TCP транспорт
 }
 
 // ProfileData — данные сервера, хранятся в ~/.config/pwdtt/servers/<name>.json.
@@ -21,6 +22,7 @@ type ProfileData struct {
 	TurnHost string   `json:"turn"`      // переопределение IP TURN
 	TurnPort string   `json:"port"`      // переопределение порта TURN
 	DeviceID string   `json:"device_id"` // уникальный ID устройства
+	TurnTCP  bool     `json:"turn_tcp"`  // использовать TCP транспорт
 }
 
 // AppSettings — настройки приложения, хранятся в ~/.config/pwdtt/config.json.
@@ -28,4 +30,5 @@ type AppSettings struct {
 	AutoStart    bool   `json:"autoStart"`    // автозапуск при старте системы
 	ObfsMode     string `json:"obfsMode"`     // audio/video
 	ObfsAccepted bool   `json:"obfsAccepted"` // пользователь принял предупреждение об обфускации
+	TurnTCP      bool   `json:"turnTcp"`      // использовать TCP транспорт
 }

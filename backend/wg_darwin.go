@@ -148,6 +148,9 @@ func (w *WG) applyDarwin(confText string, turnIPs []string, logf wgLogFunc) erro
 		return fmt.Errorf("device up: %w", err)
 	}
 
+	// Захватываем stateMu только на секцию присвоения состояния: osascript
+	// выше может висеть минутами (диалог пароля) — нельзя блокировать Teardown
+	w.stateMu.Lock()
 	w.activeTun = tunDev
 	w.activeDevice = dev
 	w.helperConn = hconn
@@ -155,12 +158,16 @@ func (w *WG) applyDarwin(confText string, turnIPs []string, logf wgLogFunc) erro
 	w.activeRoutesMu.Lock()
 	w.activeRoutes = tunnels
 	w.activeRoutesMu.Unlock()
+	w.stateMu.Unlock()
 
 	logf(fmt.Sprintf("Туннель %s поднят, маршруты: %v", utunName, tunnels))
 	return nil
 }
 
 func (w *WG) teardownDarwin() {
+	w.stateMu.Lock()
+	defer w.stateMu.Unlock()
+
 	// Останавливаем движок и закрываем fd — utun и его маршруты исчезают сами
 	if w.activeDevice != nil {
 		w.activeDevice.Close()

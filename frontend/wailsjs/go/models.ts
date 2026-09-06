@@ -9,6 +9,7 @@ export namespace backend {
 	    captchaMode?: string;
 	    obfsMode?: string;
 	    fingerprint?: string;
+	    turnTcp?: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new ConnectParams(source);
@@ -24,24 +25,7 @@ export namespace backend {
 	        this.captchaMode = source["captchaMode"];
 	        this.obfsMode = source["obfsMode"];
 	        this.fingerprint = source["fingerprint"];
-	    }
-	}
-	export class IPInfo {
-	    query: string;
-	    country: string;
-	    status: string;
-	    latency: number;
-	
-	    static createFrom(source: any = {}) {
-	        return new IPInfo(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.query = source["query"];
-	        this.country = source["country"];
-	        this.status = source["status"];
-	        this.latency = source["latency"];
+	        this.turnTcp = source["turnTcp"];
 	    }
 	}
 	export class LogEntry {
@@ -70,6 +54,7 @@ export namespace backend {
 	    turn: string;
 	    port: string;
 	    device_id: string;
+	    turn_tcp: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new ProfileData(source);
@@ -84,6 +69,7 @@ export namespace backend {
 	        this.turn = source["turn"];
 	        this.port = source["port"];
 	        this.device_id = source["device_id"];
+	        this.turn_tcp = source["turn_tcp"];
 	    }
 	}
 	export class UpdateInfo {

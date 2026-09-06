@@ -287,7 +287,7 @@ export default function Connect() {
           peer: consumed.host,
           password: consumed.password,
           hashes: h4 as unknown as string[],
-          turn: '', port: consumed.port || '', device_id: '', listen: '',
+          turn: '', port: consumed.port || '', device_id: '', listen: '', turn_tcp: false,
         });
         const s = serverStore.add({
           name,
@@ -303,7 +303,10 @@ export default function Connect() {
         linkFlashTimerRef.current = setTimeout(() => setLinkFlash(false), 800);
         toastStore.show(`Профиль добавлен: ${name}`, 3000);
       };
-      applyLink();
+      applyLink().catch(e => {
+        console.warn('applyLink failed:', e);
+        toastStore.show('Не удалось добавить сервер по ссылке', 3000);
+      });
     });
   }, []);
 
@@ -333,6 +336,7 @@ export default function Connect() {
         workers,
         captchaMode: 'auto',
         obfsMode: settingsStore.get().obfsMode || 'audio',
+        turnTcp: settingsStore.get().turnTcp || false,
       });
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);

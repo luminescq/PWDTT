@@ -110,6 +110,14 @@ export default function Settings({ onClose }: Props) {
             </div>
           </div>
 
+          <div className="st-row">
+            <span>Транспорт TURN</span>
+            <div className="st-segment">
+              <button type="button" className={`st-seg-btn${!settings.turnTcp ? ' st-seg-btn--active' : ''}`} onClick={() => update('turnTcp', false)}>UDP</button>
+              <button type="button" className={`st-seg-btn${settings.turnTcp ? ' st-seg-btn--active' : ''}`} onClick={() => update('turnTcp', true)}>TCP</button>
+            </div>
+          </div>
+
           <div className="st-info">
             <div className="st-info-name">PWDTT</div>
             <div className="st-info-ver">v{version}</div>

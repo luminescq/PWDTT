@@ -54,12 +54,31 @@ func WorkerGroup(
 	signalSpawn chan<- struct{},
 ) {
 
+	// signalSpawnOnce гарантирует ровно один close(signalSpawn) на любом пути выхода
+	spawnSignaled := false
+	signalSpawnOnce := func() {
+		if signalSpawn != nil && !spawnSignaled {
+			spawnSignaled = true
+			close(signalSpawn)
+		}
+	}
+
 	if waitCreds != nil {
 		select {
 		case <-waitCreds:
 		case <-ctx.Done():
+			signalSpawnOnce()
 			return
 		}
+	}
+
+	// Сигнал следующей группе не должен зависеть от успешности GetCreds ниже:
+	// иначе один transient-фейл VK API навсегда блокирует все последующие группы
+	if signalCreds != nil {
+		go func() {
+			time.Sleep(2 * time.Second)
+			close(signalCreds)
+		}()
 	}
 
 	var configSent int32
@@ -69,9 +88,19 @@ func WorkerGroup(
 
 	for atomic.LoadInt32(pauseFlag) != 0 {
 		if ctx.Err() != nil {
+			signalSpawnOnce()
 			return
 		}
 		time.Sleep(1 * time.Second)
+	}
+
+	if waitSpawn != nil {
+		select {
+		case <-waitSpawn:
+		case <-ctx.Done():
+			signalSpawnOnce()
+			return
+		}
 	}
 
 	hash := tp.Hashes[hashIndex%len(tp.Hashes)]
@@ -82,70 +111,84 @@ func WorkerGroup(
 	log.Printf("[ГРУППА #%d] Запрос кредов (хеш: %s...)", groupID, shortHash)
 
 	credStreamID := groupID * 100
-	user, pass, turnURLs, err := GetCreds(ctx, hash, credStreamID)
-	var creds *Credentials
-	if err == nil {
-		creds = &Credentials{User: user, Pass: pass, TurnURLs: turnURLs, CacheStreamID: credStreamID}
-	} else {
-		log.Printf("[ГРУППА #%d] Ошибка кредов: %v", groupID, err)
-		return
+
+	var credsMu sync.RWMutex
+	var curUser, curPass string
+	var curURLs []string
+	var credGen uint64
+
+	fetchCreds := func() error {
+		u, p, urls, err := GetCreds(ctx, hash, credStreamID)
+		if err != nil {
+			return err
+		}
+		credsMu.Lock()
+		curUser, curPass, curURLs = u, p, urls
+		credsMu.Unlock()
+		return nil
 	}
 
-	log.Printf("[ГРУППА #%d] Креды OK, TURN: %v, %d воркеров", groupID, creds.TurnURLs, len(workerIDs))
-
-	// Отправляем TURN IP для exclude routes (только первая группа)
-	if groupID == 1 && turnIPsCh != nil && len(creds.TurnURLs) > 0 {
-		var turnIPs []string
-		for _, url := range creds.TurnURLs {
-			host, _, err := net.SplitHostPort(url)
-			if err != nil {
-				host = url
-			}
-			if tp.Host != "" {
-				host = tp.Host
-			}
-			resolved, err := net.LookupIP(host)
-			if err != nil {
-				turnIPs = append(turnIPs, host)
-			} else {
-				for _, ip := range resolved {
-					turnIPs = append(turnIPs, ip.String())
-				}
-			}
-		}
-		// Дедупликация
-		seen := make(map[string]bool)
-		var unique []string
-		for _, ip := range turnIPs {
-			if !seen[ip] {
-				seen[ip] = true
-				unique = append(unique, ip)
-			}
+	// Первичное получение кредов — с ретраями, а не один фейл навсегда
+	for attempt := 1; ; attempt++ {
+		if err := fetchCreds(); err == nil {
+			break
+		} else {
+			log.Printf("[ГРУППА #%d] Ошибка кредов (попытка %d): %v", groupID, attempt, err)
 		}
 		select {
-		case turnIPsCh <- unique:
-		default:
+		case <-time.After(5 * time.Second):
+		case <-ctx.Done():
+			signalSpawnOnce()
+			return
+		}
+	}
+
+	credsMu.RLock()
+	log.Printf("[ГРУППА #%d] Креды OK, TURN: %v, %d воркеров", groupID, curURLs, len(workerIDs))
+	credsMu.RUnlock()
+
+	// Отправляем TURN IP для exclude routes (только первая группа)
+	if groupID == 1 && turnIPsCh != nil {
+		credsMu.RLock()
+		urls := cloneStringSlice(curURLs)
+		credsMu.RUnlock()
+		if len(urls) > 0 {
+			var turnIPs []string
+			for _, url := range urls {
+				host, _, err := net.SplitHostPort(url)
+				if err != nil {
+					host = url
+				}
+				if tp.Host != "" {
+					host = tp.Host
+				}
+				resolved, err := net.LookupIP(host)
+				if err != nil {
+					turnIPs = append(turnIPs, host)
+				} else {
+					for _, ip := range resolved {
+						turnIPs = append(turnIPs, ip.String())
+					}
+				}
+			}
+			// Дедупликация
+			seen := make(map[string]bool)
+			var unique []string
+			for _, ip := range turnIPs {
+				if !seen[ip] {
+					seen[ip] = true
+					unique = append(unique, ip)
+				}
+			}
+			select {
+			case turnIPsCh <- unique:
+			default:
+			}
 		}
 	}
 
 	var configRequestInFlight int32
 	var wg sync.WaitGroup
-	var credsMu sync.RWMutex
-
-	if signalCreds != nil {
-		go func() {
-			time.Sleep(2 * time.Second)
-			close(signalCreds)
-		}()
-	}
-
-	if waitSpawn != nil {
-		select {
-		case <-waitSpawn:
-		case <-ctx.Done():
-			return
-		}
-	}
 
 	// Запускаем воркеры с поэтапной задержкой
 	for idx, wid := range workerIDs {
@@ -192,9 +235,11 @@ func WorkerGroup(
 					time.Sleep(1 * time.Second)
 				}
 
-				// Берём свежие креды
+				// Берём свежие креды (могут быть обновлены после AUTH-ошибки)
 				credsMu.RLock()
-				urls := cloneStringSlice(creds.TurnURLs)
+				urls := cloneStringSlice(curURLs)
+				wUser, wPass := curUser, curPass
+				gen := credGen
 				credsMu.RUnlock()
 
 				if len(urls) == 0 {
@@ -237,16 +282,17 @@ func WorkerGroup(
 					cc = configCh
 				}
 
-				// Передаём в RunSession конкретный адрес и креды
-				configDelivered, sessErr := RunSession(
-					ctx, tp, peer, d, localPort,
-					getConf, cc, wid,
-					turnAddr,       // конкретный TURN-адрес
-					user,           // username из кредов (не меняется)
-					pass,           // password из кредов (не меняется)
-					credStreamID,   // для handleAuthError
-					deviceID, password, stats,
-				)
+					// Передаём в RunSession конкретный адрес и креды
+					configDelivered, sessErr := RunSession(
+						ctx, tp, peer, d, localPort,
+						getConf, cc, wid,
+						turnAddr,     // конкретный TURN-адрес
+						wUser,        // username из кредов
+						wPass,        // password из кредов
+						workerObfsMode,
+						credStreamID, // для handleAuthError
+						deviceID, password, stats,
+					)
 
 				if getConf {
 					if configDelivered {
@@ -282,7 +328,9 @@ func WorkerGroup(
 						continue
 
 					case SessionErrorWrapTimeout:
-						// DTLS-таймаут — пробуем сменить обфускацию
+						// DTLS-таймаут — пробуем сменить обфускацию.
+						// Режим пер-воркерский: глобальная перезапись tp.ObfsMode
+						// была гонкой и меняла режим у всех живых сессий
 						log.Printf("[ВОРКЕР #%d] WRAP_TIMEOUT на адресе %s, пробуем сменить обфускацию",
 							wid, sessErr.Address)
 
@@ -292,7 +340,6 @@ func WorkerGroup(
 						} else {
 							workerObfsMode = "audio"
 						}
-						tp.ObfsMode = workerObfsMode
 						log.Printf("[ВОРКЕР #%d] Режим обфускации изменён на %s", wid, workerObfsMode)
 
 						// Увеличиваем счётчик попыток на этом адресе
@@ -313,6 +360,27 @@ func WorkerGroup(
 						// Пробуем тот же адрес с новой обфускацией
 						continue
 
+					case SessionErrorAuth:
+						// Креды протухли (401) — обновляем и продолжаем.
+						// Обновляет только один воркер: остальные увидят новый credGen
+						log.Printf("[ВОРКЕР #%d] Ошибка авторизации TURN, обновляю креды", wid)
+						credsMu.Lock()
+						if credGen == gen {
+							if err := fetchCreds(); err == nil {
+								credGen++
+								log.Printf("[ВОРКЕР #%d] Креды обновлены", wid)
+							} else {
+								log.Printf("[ВОРКЕР #%d] Не удалось обновить креды: %v", wid, err)
+							}
+						}
+						credsMu.Unlock()
+						select {
+						case <-time.After(2 * time.Second):
+						case <-ctx.Done():
+							return
+						}
+						continue
+
 					case SessionErrorFatal:
 						// Фатальная ошибка — выходим
 						log.Printf("[ВОРКЕР #%d] Фатальная ошибка: %v", wid, sessErr.Err)
@@ -331,10 +399,6 @@ func WorkerGroup(
 
 				// Успех — сбрасываем счётчики
 				addressAttempts = 0
-				// Возвращаем ObfsMode к исходному (если он менялся)
-				if workerObfsMode != tp.ObfsMode {
-					workerObfsMode = tp.ObfsMode
-				}
 
 				// После успешной сессии — небольшая пауза перед следующим циклом
 				select {
@@ -346,9 +410,7 @@ func WorkerGroup(
 		}(wid, startDelay)
 	}
 
-	if signalSpawn != nil {
-		close(signalSpawn)
-	}
+	signalSpawnOnce()
 
 	wg.Wait()
 	log.Printf("[ГРУППА #%d] Все воркеры группы завершились.", groupID)
@@ -392,16 +454,10 @@ func normalizeVKJoinHash(input string) string {
 }
 
 type TurnParams struct {
-	Host     string
-	Port     string
-	Hashes   []string
-	WrapKey  []byte
-	ObfsMode string
-}
-
-type Credentials struct {
-	User          string
-	Pass          string
-	TurnURLs      []string
-	CacheStreamID int
+	Host         string
+	Port         string
+	Hashes       []string
+	WrapKey      []byte
+	ObfsMode     string
+	TCPTransport bool
 }

@@ -11,16 +11,23 @@ import (
 // newTestStore создаёт Store с временной директорией.
 func newTestStore(t *testing.T) *backend.Store {
 	t.Helper()
-	// Store читает baseDir из configDir(), но мы можем создать
-	// реальный Store и подменить через Save/Load — проще всего
-	// использовать реальный путь с тестовым суффиксом.
-	//
-	// Для изоляции используем HOME → tmpdir.
 	dir := t.TempDir()
 	t.Setenv("HOME", dir)
-	os.MkdirAll(filepath.Join(dir, ".config", "pwdtt", "servers"), 0o755)
-	os.MkdirAll(filepath.Join(dir, ".config", "pwdtt", "logs"), 0o755)
+	// os.UserConfigDir() на Windows читает %AppData%, на Linux — XDG_CONFIG_HOME:
+	// без подмены тесты пишут в РЕАЛЬНЫЙ конфиг пользователя (%APPDATA%\pwdtt)
+	t.Setenv("AppData", filepath.Join(dir, "AppData", "Roaming"))
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(dir, ".config"))
 	return backend.NewStore()
+}
+
+// pwdttDir — зеркало configDir() из store.go: где Store реально держит файлы.
+func pwdttDir(t *testing.T) string {
+	t.Helper()
+	base, err := os.UserConfigDir()
+	if err != nil {
+		base = os.Getenv("HOME")
+	}
+	return filepath.Join(base, "pwdtt")
 }
 
 // ═══════════════════════════════════════════════════
@@ -41,8 +48,7 @@ func TestLoadSettings_FileNotExists(t *testing.T) {
 
 func TestLoadSettings_InvalidJSON(t *testing.T) {
 	s := newTestStore(t)
-	home := os.Getenv("HOME")
-	path := filepath.Join(home, ".config", "pwdtt", "config.json")
+	path := filepath.Join(pwdttDir(t), "config.json")
 	os.WriteFile(path, []byte(`{invalid json`), 0o644)
 
 	settings := s.LoadSettings()
@@ -58,7 +64,8 @@ func TestLoadSettings_InvalidJSON(t *testing.T) {
 func TestLoadSaveSettings_Roundtrip(t *testing.T) {
 	s := newTestStore(t)
 
-	original := backend.AppSettings{AutoStart: false, ObfsMode: "video"}
+	// ObfsAccepted=true, иначе LoadSettings принудительно вернёт "audio"
+	original := backend.AppSettings{AutoStart: false, ObfsMode: "video", ObfsAccepted: true}
 	if err := s.SaveSettings(original); err != nil {
 		t.Fatalf("SaveSettings: %v", err)
 	}
@@ -74,8 +81,7 @@ func TestLoadSaveSettings_Roundtrip(t *testing.T) {
 
 func TestLoadSettings_EmptyFile(t *testing.T) {
 	s := newTestStore(t)
-	home := os.Getenv("HOME")
-	path := filepath.Join(home, ".config", "pwdtt", "config.json")
+	path := filepath.Join(pwdttDir(t), "config.json")
 	os.WriteFile(path, []byte{}, 0o644)
 
 	settings := s.LoadSettings()
@@ -86,8 +92,7 @@ func TestLoadSettings_EmptyFile(t *testing.T) {
 
 func TestLoadSettings_UnknownFields(t *testing.T) {
 	s := newTestStore(t)
-	home := os.Getenv("HOME")
-	path := filepath.Join(home, ".config", "pwdtt", "config.json")
+	path := filepath.Join(pwdttDir(t), "config.json")
 	os.WriteFile(path, []byte(`{"unknownField": true}`), 0o644)
 
 	settings := s.LoadSettings()
@@ -95,8 +100,9 @@ func TestLoadSettings_UnknownFields(t *testing.T) {
 	if settings.AutoStart != false {
 		t.Errorf("expected AutoStart=false (zero value), got %v", settings.AutoStart)
 	}
-	if settings.ObfsMode != "" {
-		t.Errorf("expected ObfsMode='' (zero value), got %q", settings.ObfsMode)
+	// obfsAccepted=false → LoadSettings принудительно ставит безопасный "audio"
+	if settings.ObfsMode != "audio" {
+		t.Errorf("expected ObfsMode='audio' (obfsAccepted=false), got %q", settings.ObfsMode)
 	}
 }
 
@@ -221,8 +227,7 @@ func TestListProfiles_Multiple(t *testing.T) {
 
 func TestListProfiles_SkipsNonJSON(t *testing.T) {
 	s := newTestStore(t)
-	home := os.Getenv("HOME")
-	serversDir := filepath.Join(home, ".config", "pwdtt", "servers")
+	serversDir := filepath.Join(pwdttDir(t), "servers")
 
 	s.SaveProfile("valid", backend.ProfileData{PeerAddr: "1.1.1.1:1111"})
 	os.WriteFile(filepath.Join(serversDir, "readme.txt"), []byte("hello"), 0o644)
@@ -276,8 +281,7 @@ func TestDeleteProfile_EmptyName(t *testing.T) {
 
 func TestCreateLogFile(t *testing.T) {
 	s := newTestStore(t)
-	home := os.Getenv("HOME")
-	logsDir := filepath.Join(home, ".config", "pwdtt", "logs")
+	logsDir := filepath.Join(pwdttDir(t), "logs")
 
 	f, err := s.CreateLogFile("1.2.3.4")
 	if err != nil {
@@ -321,8 +325,7 @@ func TestCreateLogFile_Writable(t *testing.T) {
 
 func TestOpenLogFile(t *testing.T) {
 	s := newTestStore(t)
-	home := os.Getenv("HOME")
-	logsDir := filepath.Join(home, ".config", "pwdtt", "logs")
+	logsDir := filepath.Join(pwdttDir(t), "logs")
 
 	lf := s.OpenLogFile()
 	if lf == nil {
@@ -371,8 +374,7 @@ func TestReadLatestLog_NoLogs(t *testing.T) {
 
 func TestReadLatestLog_WithLogs(t *testing.T) {
 	s := newTestStore(t)
-	home := os.Getenv("HOME")
-	logDir := filepath.Join(home, ".config", "pwdtt", "logs")
+	logDir := filepath.Join(pwdttDir(t), "logs")
 
 	os.WriteFile(filepath.Join(logDir, "2025-01-01_10-00-00.log"), []byte("old log"), 0o644)
 	os.WriteFile(filepath.Join(logDir, "2025-06-01_12-00-00.log"), []byte("latest log"), 0o644)

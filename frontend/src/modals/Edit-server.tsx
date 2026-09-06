@@ -52,12 +52,21 @@ export default function EditServer({ server, onClose, onSave, onDelete }: Props)
       power,
     };
     // Сначала сохраняем новый, потом удаляем старый
-    await SaveProfile(updated.name, {
-      peer: updated.host,
-      password: updated.password,
-      hashes,
-      turn: '', port: '', device_id: '', listen: '',
-    }).catch(() => { toastStore.show('Ошибка сохранения', 3000); });
+    try {
+      await SaveProfile(updated.name, {
+        peer: updated.host,
+        password: updated.password,
+        hashes,
+        turn: '', port: '', device_id: '', listen: '',
+        turn_tcp: false,
+      });
+    } catch {
+      // Не двигаем UI-состояние: иначе localStorage разойдётся с диском,
+      // а авто-реимпорт профилей создаст дубликат
+      toastStore.show('Ошибка сохранения', 3000);
+      setSaving(false);
+      return;
+    }
     if (server.name !== updated.name) {
       await DeleteProfile(server.name).catch(() => { toastStore.show('Ошибка удаления', 3000); });
     }

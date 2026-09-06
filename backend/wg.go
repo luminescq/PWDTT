@@ -13,7 +13,6 @@ import (
 	"runtime"
 	"strings"
 	"sync"
-	"time"
 
 	"golang.zx2c4.com/wireguard/conn"
 	"golang.zx2c4.com/wireguard/device"
@@ -23,7 +22,10 @@ import (
 // WG — управление WireGuard интерфейсом.
 var wg = &WG{}
 
-const wgIface = "wg-turn"
+const wgIface = "pwdtt-wg"
+
+// Статический GUID для Wintun задан в wg_windows_init.go (windows-only),
+// чтобы не плодить адаптеры (pwdtt-wg 2, pwdtt-wg 3) при крашах приложения.
 
 // ═══════════════════════════════════════════════════
 // PUBLIC API
@@ -32,6 +34,11 @@ const wgIface = "wg-turn"
 type WG struct {
 	activeRoutes   []string
 	activeRoutesMu sync.Mutex
+
+	// stateMu сериализует Apply/Teardown и защищает поля ниже:
+	// Apply вызывается из горутины forwardEvents, Teardown — из потока
+	// Wails-биндинга (Disconnect), одновременный доступ = гонка.
+	stateMu sync.Mutex
 
 	// Windows/macOS userspace-specific
 	activeDevice        *device.Device
@@ -281,7 +288,9 @@ var wintunDLLData []byte
 func InitWintun(dll []byte) { wintunDLLData = dll }
 
 func (w *WG) applyWindows(conf string, turnIPs []string, logf wgLogFunc) error {
-	w.teardownWindows()
+	w.stateMu.Lock()
+	defer w.stateMu.Unlock()
+	w.teardownWindowsLocked()
 
 	if err := extractWintun(); err != nil {
 		return fmt.Errorf("extract wintun.dll: %w", err)
@@ -379,6 +388,12 @@ func (w *WG) applyWindows(conf string, turnIPs []string, logf wgLogFunc) error {
 }
 
 func (w *WG) teardownWindows() {
+	w.stateMu.Lock()
+	defer w.stateMu.Unlock()
+	w.teardownWindowsLocked()
+}
+
+func (w *WG) teardownWindowsLocked() {
 	if w.activeDevice == nil && w.activeTun == nil {
 		return
 	}
@@ -398,6 +413,12 @@ func (w *WG) teardownWindows() {
 	}
 	w.activeExcludeRoutes = nil
 
+	// Delete tunnel routes explicitly to prevent Windows routing table corruption
+	for _, cidr := range w.activeRoutes {
+		_ = runCmdWindows("netsh", "interface", "ip", "delete", "route", cidr, wgIface)
+	}
+	w.activeRoutes = nil
+
 	// Close WireGuard device
 	if w.activeDevice != nil {
 		w.activeDevice.Close()
@@ -409,40 +430,6 @@ func (w *WG) teardownWindows() {
 		w.activeTun.Close()
 		w.activeTun = nil
 	}
-
-	// Clean up orphaned adapters
-	cleanupWintunAdapter()
-}
-
-// cleanupWintunAdapter attempts to delete any existing wintun adapter from
-// Windows. This prevents orphaned adapters and naming issues.
-func cleanupWintunAdapter() {
-	// Delete our named adapters
-	_ = runCmdWindows("netsh", "interface", "delete", "interface", wgIface)
-	for i := 2; i <= 10; i++ {
-		name := fmt.Sprintf("%s %d", wgIface, i)
-		_ = runCmdWindows("netsh", "interface", "delete", "interface", name)
-	}
-	// Also try to find and delete orphaned wintun adapters
-	// They show up as "Подключение по локальной сети" or similar
-	listCmd := exec.Command("cmd", "/c", "netsh interface show interface")
-	hideWindow(listCmd)
-	out, err := listCmd.CombinedOutput()
-	if err == nil {
-		for _, line := range strings.Split(string(out), "\n") {
-			lower := strings.ToLower(line)
-			if strings.Contains(lower, "wintun") || strings.Contains(lower, "wg-turn") {
-				fields := strings.Fields(line)
-				if len(fields) >= 4 {
-					ifName := fields[len(fields)-1]
-					if ifName != wgIface {
-						_ = runCmdWindows("netsh", "interface", "delete", "interface", ifName)
-					}
-				}
-			}
-		}
-	}
-	time.Sleep(100 * time.Millisecond)
 }
 
 func extractWintun() error {

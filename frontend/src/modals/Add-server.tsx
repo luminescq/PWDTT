@@ -3,6 +3,7 @@ import { IconCircleHalf2, IconEye, IconEyeOff, IconX, IconHash } from '@tabler/i
 import type { Server } from '../lib/types';
 import { SaveProfile } from '../../wailsjs/go/backend/App';
 import { parseWdttUrl } from '../lib/utils/wdttLink';
+import { toastStore } from '../lib/stores/toastStore';
 import Hash from './Hash';
 
 interface Props {
@@ -64,11 +65,18 @@ export default function AddServer({ onClose, onAdd }: Props) {
       await SaveProfile(name.trim(), {
         peer: host,
         password,
-        hashes: [],
-        turn: '', port: '', device_id: '', listen: '',
+        hashes: hashes.filter(h => h.trim()),
+        turn: '',
+        port: '',
+        device_id: '',
+        listen: '127.0.0.1:9000',
+        turn_tcp: false,
       });
     } catch (e) {
       console.warn('SaveProfile failed:', e);
+      toastStore.show('Не удалось сохранить профиль на диск', 3000);
+      setSaving(false);
+      return; // профиль в бэкенде — источник истины; без него сервер "потеряет" хеши
     }
 
     onAdd({ name: name.trim(), host, password, hashes, power });

@@ -14,6 +14,7 @@ export interface AppSettings {
   autoStart: boolean;
   obfsMode: 'audio' | 'video';
   obfsAccepted: boolean;
+  turnTcp: boolean;
 }
 
 export type TunnelState = 'idle' | 'connecting' | 'connected' | 'disconnecting';
@@ -22,4 +23,5 @@ export const DEFAULT_SETTINGS: AppSettings = {
   autoStart: true,
   obfsMode: 'audio',
   obfsAccepted: false,
+  turnTcp: false,
 };

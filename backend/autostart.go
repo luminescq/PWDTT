@@ -86,20 +86,27 @@ func setAutoStartWindows(v bool) error {
 	if err != nil {
 		return err
 	}
+	
+	taskName := "PWDTT_AutoStart"
+	
 	if !v {
-		cmd := exec.Command("reg", "delete", runKey, "/v", "PWDTT", "/f")
+		// Remove scheduled task
+		cmd := exec.Command("schtasks", "/delete", "/tn", taskName, "/f")
 		hideWindow(cmd)
 		out, err := cmd.CombinedOutput()
-		if err != nil && !strings.Contains(string(out), "не удалось найти") {
-			return fmt.Errorf("reg delete: %w — %s", err, strings.TrimSpace(string(out)))
+		if err != nil && !strings.Contains(string(out), "не удается найти") && !strings.Contains(strings.ToLower(string(out)), "cannot find") {
+			return fmt.Errorf("schtasks delete: %w — %s", err, strings.TrimSpace(string(out)))
 		}
 		return nil
 	}
-	cmd := exec.Command("reg", "add", runKey, "/v", "PWDTT", "/t", "REG_SZ", "/d", exe, "/f")
+	
+	// Create scheduled task to run on user logon with highest privileges (admin)
+	// This prevents the UAC prompt on every system startup.
+	cmd := exec.Command("schtasks", "/create", "/tn", taskName, "/tr", fmt.Sprintf("\"%s\"", exe), "/sc", "onlogon", "/rl", "HIGHEST", "/f")
 	hideWindow(cmd)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("reg add: %w — %s", err, strings.TrimSpace(string(out)))
+		return fmt.Errorf("schtasks create: %w — %s", err, strings.TrimSpace(string(out)))
 	}
 	return nil
 }

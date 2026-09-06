@@ -44,6 +44,13 @@ func (a *App) Startup(ctx context.Context) {
 	})
 }
 
+// Shutdown вызывается Wails при закрытии приложения.
+func (a *App) Shutdown(ctx context.Context) {
+	if a.bridge != nil {
+		a.bridge.Disconnect()
+	}
+}
+
 // ═══════════════════════════════════════════════════
 // WAILS BINDINGS
 // ═══════════════════════════════════════════════════

@@ -7,9 +7,13 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/google/uuid"
 )
+
+// maxProfileNameRunes — предел длины имени профиля (имя = имя файла)
+const maxProfileNameRunes = 100
 
 // Store — пассивный модуль хранения данных.
 // Все записи атомарные (write to tmp → rename).
@@ -68,16 +72,21 @@ func (s *Store) SaveSettings(settings AppSettings) error {
 // PROFILES — CRUD для серверов
 // ═══════════════════════════════════════════════════
 
-// sanitizeProfileName валидирует имя профиля — только буквы, цифры, дефисы, подчёркивания.
+// sanitizeProfileName валидирует имя профиля: буквы и цифры (включая кириллицу),
+// дефисы, подчёркивания, пробелы. Символы, опасные для файловой системы
+// (\/ : * ? " < > | и управляющие), вырезаются.
 func sanitizeProfileName(name string) string {
-	var out []byte
+	var out []rune
 	for _, r := range name {
-		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') ||
-			(r >= '0' && r <= '9') || r == '-' || r == '_' || r == ' ' {
-			out = append(out, []byte(string(r))...)
+		switch {
+		case unicode.IsLetter(r), unicode.IsDigit(r), r == '-', r == '_', r == ' ':
+			out = append(out, r)
 		}
 	}
-	return string(out)
+	if len(out) > maxProfileNameRunes {
+		out = out[:maxProfileNameRunes]
+	}
+	return strings.TrimSpace(string(out))
 }
 
 // LoadProfile загружает профиль сервера по имени.
@@ -242,11 +251,12 @@ func atomicWrite(path string, data []byte) error {
 }
 
 // NewTestStore создаёт Store с временной директорией (для тестов).
-// Устанавливает HOME в tmpdir и создаёт нужные поддиректории.
+// Подменяет HOME и, на Windows, AppData — os.UserConfigDir() читает именно их,
+// иначе тесты пишут в реальный конфиг пользователя.
 func NewTestStore(t interface{ TempDir() string; Setenv(string, string) }) *Store {
 	dir := t.TempDir()
 	t.Setenv("HOME", dir)
-	os.MkdirAll(filepath.Join(dir, ".config", "pwdtt", "servers"), 0o755)
-	os.MkdirAll(filepath.Join(dir, ".config", "pwdtt", "logs"), 0o755)
+	t.Setenv("AppData", filepath.Join(dir, "AppData", "Roaming"))
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(dir, ".config"))
 	return NewStore()
 }

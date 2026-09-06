@@ -64,6 +64,7 @@ type Config struct {
 	CaptchaMode string   // auto/rjs/wv
 	ObfsMode    string   // audio/video
 	Fingerprint string   // chrome/android/ios/safari/firefox
+	TurnTCP     bool     // использовать TCP транспорт
 }
 
 // ═══════════════════════════════════════════════════
@@ -72,6 +73,7 @@ type Config struct {
 
 type Core struct {
 	cfg               Config
+	ctx               context.Context
 	cancel            context.CancelFunc
 	pauseFlag         int32
 	CaptchaResultChan chan string
@@ -79,8 +81,12 @@ type Core struct {
 	vkAuthMode        atomic.Value
 	events            chan Event
 	startOnce         sync.Once // guard от двойного Start()
+	startErr          atomic.Value // *startFailure — ошибка первого Start(), если он провалился
 	once              sync.Once // guard от двойного Stop()
 }
+
+// startFailure — обёртка для atomic.Value (чтобы разные error-типы не паниковали).
+type startFailure struct{ err error }
 
 // activeCore — текущий запущенный экземпляр ядра.
 // Нужен для доступа из session.go, vk_auth.go и др. файлов.
@@ -116,8 +122,11 @@ func New(cfg Config) *Core {
 		cfg.ObfsMode = "audio"
 	}
 
+	ctx, cancel := context.WithCancel(context.Background())
 	c := &Core{
 		cfg:               cfg,
+		ctx:               ctx,
+		cancel:            cancel,
 		CaptchaResultChan: make(chan string, 1),
 		events:            make(chan Event, 1024), // увеличен буфер для логов
 	}
@@ -127,19 +136,37 @@ func New(cfg Config) *Core {
 }
 
 // Start запускает ядро. Возвращает канал событий (закрывается при завершении).
-// Второй вызов возвращает ошибку.
+// Повторный вызов возвращает ту же ошибку, если первый Start провалился —
+// иначе звонящий получил бы «успех» без работающего ядра.
 func (c *Core) Start() (<-chan Event, error) {
 	var startErr error
 	c.startOnce.Do(func() {
 		startErr = c.start()
+		if startErr != nil {
+			c.startErr.Store(&startFailure{err: startErr})
+		}
 	})
 	if startErr != nil {
 		return nil, startErr
+	}
+	if f, ok := c.startErr.Load().(*startFailure); ok {
+		return nil, fmt.Errorf("core start previously failed: %w", f.err)
 	}
 	return c.events, nil
 }
 
 func (c *Core) start() error {
+	// Если start() упадёт до запуска success-горутины (валидация, resolve,
+	// listen) — глобальный логгер останется направленным на брошенное ядро,
+	// чей events-канал никто не читает, и все последующие log.Printf
+	// будут молча пропадать. Возвращаем stderr на любом error-пути.
+	startFailed := true
+	defer func() {
+		if startFailed {
+			log.SetOutput(os.Stderr)
+		}
+	}()
+
 	setupGlobalResolver()
 
 	// Все log.Printf → в канал событий (с фильтрацией)
@@ -157,8 +184,8 @@ func (c *Core) start() error {
 		SetActiveFingerprint(c.cfg.Fingerprint)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	c.cancel = cancel
+	ctx := c.ctx
+	cancel := c.cancel
 
 	// Валидация
 	if c.cfg.PeerAddr == "" {
@@ -179,6 +206,9 @@ func (c *Core) start() error {
 	var peer *net.UDPAddr
 	var err error
 	for i := 0; i < 15; i++ {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 		peer, err = net.ResolveUDPAddr("udp", cleanPeerAddr)
 		if err == nil {
 			break
@@ -208,11 +238,12 @@ func (c *Core) start() error {
 	n = (n / workersPerGroup) * workersPerGroup
 
 	tp := &TurnParams{
-		Host:     c.cfg.TurnHost,
-		Port:     c.cfg.TurnPort,
-		Hashes:   c.cfg.Hashes,
-		WrapKey:  wrapKey,
-		ObfsMode: c.cfg.ObfsMode,
+		Host:         c.cfg.TurnHost,
+		Port:         c.cfg.TurnPort,
+		Hashes:       c.cfg.Hashes,
+		WrapKey:      wrapKey,
+		ObfsMode:     c.cfg.ObfsMode,
+		TCPTransport: c.cfg.TurnTCP,
 	}
 
 	// Локальный UDP сокет
@@ -289,6 +320,8 @@ func (c *Core) start() error {
 
 	// Старт
 	c.emit(Event{Type: EventState, Status: "connecting"})
+
+	startFailed = false // дальнейшая уборка логгера — на success-горутине
 
 	go func() {
 		defer close(c.events)

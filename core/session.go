@@ -31,6 +31,29 @@ type connectedUDPConn struct{ *net.UDPConn }
 
 func (c *connectedUDPConn) WriteTo(p []byte, _ net.Addr) (int, error) { return c.Write(p) }
 
+func dialTURNConn(turnAddr string, tcp bool) (net.PacketConn, error) {
+	if !tcp {
+		resolved, err := net.ResolveUDPAddr("udp", turnAddr)
+		if err != nil {
+			return nil, fmt.Errorf("резолв TURN: %w", err)
+		}
+		c, err := net.DialUDP("udp", nil, resolved)
+		if err != nil {
+			return nil, fmt.Errorf("подключение TURN UDP: %w", err)
+		}
+		_ = c.SetReadBuffer(socketBufSize)
+		_ = c.SetWriteBuffer(socketBufSize)
+		return &connectedUDPConn{c}, nil
+	}
+
+	d := net.Dialer{Timeout: 10 * time.Second}
+	c, err := d.Dial("tcp", turnAddr)
+	if err != nil {
+		return nil, fmt.Errorf("подключение TURN TCP: %w", err)
+	}
+	return turn.NewSTUNConn(c), nil
+}
+
 // SessionErrorType — тип ошибки сессии
 type SessionErrorType string
 
@@ -39,6 +62,8 @@ const (
 	SessionErrorAddressDead SessionErrorType = "ADDRESS_DEAD"
 	// WRAP_TIMEOUT — DTLS-рукопожатие не прошло, нужно сменить обфускацию
 	SessionErrorWrapTimeout SessionErrorType = "WRAP_TIMEOUT"
+	// AUTH — TURN отклонил креды (401/протухшие); нужно обновить креды и повторить
+	SessionErrorAuth SessionErrorType = "AUTH"
 	// FATAL — невосстановимая ошибка (FATAL_AUTH, хеш мёртв и т.д.)
 	SessionErrorFatal SessionErrorType = "FATAL"
 )
@@ -73,6 +98,7 @@ func RunSession(
 	turnAddr string, // конкретный TURN-адрес
 	turnUser string, // username для TURN
 	turnPass string, // password для TURN
+	obfsMode string, // режим обфускации (пер-воркерский, может меняться на WRAP_TIMEOUT)
 	cacheStreamID int, // для handleAuthError
 	deviceID, password string,
 	stats *Stats,
@@ -102,29 +128,21 @@ func RunSession(
 	}
 	turnAddrResolved := net.JoinHostPort(urlhost, urlport)
 
-	resolved, err := net.ResolveUDPAddr("udp", turnAddrResolved)
+	turnConn, err := dialTURNConn(turnAddrResolved, tp.TCPTransport)
 	if err != nil {
 		return false, &SessionError{
 			Type:    SessionErrorAddressDead,
 			Address: turnAddr,
-			Err:     fmt.Errorf("резолв TURN: %w", err),
+			Err:     err,
 		}
 	}
+	defer turnConn.Close()
 
-	c, err := net.DialUDP("udp", nil, resolved)
-	if err != nil {
-		return false, &SessionError{
-			Type:    SessionErrorAddressDead,
-			Address: turnAddr,
-			Err:     fmt.Errorf("подключение TURN UDP: %w", err),
-		}
+	if tp.TCPTransport {
+		log.Printf("[СЕССИЯ #%d] TURN TCP (%s)", sessionID, turnAddr)
+	} else {
+		log.Printf("[СЕССИЯ #%d] TURN UDP (%s)", sessionID, turnAddr)
 	}
-	defer c.Close()
-	_ = c.SetReadBuffer(socketBufSize)
-	_ = c.SetWriteBuffer(socketBufSize)
-	var turnConn net.PacketConn = &connectedUDPConn{c}
-
-	log.Printf("[СЕССИЯ #%d] TURN UDP (%s)", sessionID, turnAddr)
 
 	var addrFamily turn.RequestedAddressFamily
 	if peer.IP.To4() != nil {
@@ -167,6 +185,13 @@ func RunSession(
 		// Проверяем на ошибки авторизации (кеш кредов)
 		if isAuthError(err) {
 			handleAuthError(cacheStreamID)
+			// Креды протухли — это НЕ фатальная ошибка: воркер обновит
+			// креды через GetCreds (кеш уже инвалидирован выше) и повторит
+			return false, &SessionError{
+				Type:    SessionErrorAuth,
+				Address: turnAddr,
+				Err:     fmt.Errorf("TURN Allocate: %w", err),
+			}
 		}
 
 		// Квота, unreachable, timeout — всё это "адрес мёртв"
@@ -199,7 +224,11 @@ func RunSession(
 	pipeA, pipeB := connutil.AsyncPacketPipe()
 
 	sessCtx, sessCancel := context.WithCancel(ctx)
-	defer sessCancel()
+	// ВАЖНО: defer sessCancel() регистрируется НИЖЕ, рядом с defer stopRelay().
+	// Defers работают LIFO, и sessCancel обязан выполниться первым — иначе
+	// stopRelay снимет AfterFunc до его срабатывания, дедлайны не выставятся,
+	// и горутины релея навсегда зависнут в ReadFrom (утечка на каждом
+	// error-пути сессии).
 
 	var sessionWg sync.WaitGroup
 	sessionWg.Add(1)
@@ -225,7 +254,7 @@ func RunSession(
 	var obfsCfg *ObfsConfig
 	var obfsWriteState *ObfsState
 	if useWrap {
-		obfsCfg = NewObfsConfig(tp.ObfsMode)
+		obfsCfg = NewObfsConfig(obfsMode)
 		obfsWriteState = NewObfsState()
 	}
 
@@ -234,6 +263,7 @@ func RunSession(
 		_ = pipeA.SetDeadline(time.Now())
 	})
 	defer stopRelay()
+	defer sessCancel()
 
 	go func() {
 		defer relayWg.Done()
