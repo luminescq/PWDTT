@@ -127,7 +127,7 @@ export default function EditServer({ server, onClose, onSave, onDelete }: Props)
 
           <div className="es-slider-wrap">
             <div className="es-slider-label">
-              <span>Мощность</span>
+              <span>Мощность (всего потоков)</span>
               <span>{filledHashes === 0 ? 'нет хешей' : power}</span>
             </div>
             <input
@@ -137,7 +137,7 @@ export default function EditServer({ server, onClose, onSave, onDelete }: Props)
               disabled={filledHashes === 0}
               style={{ '--v': filledHashes > 0 ? Math.round((Math.min(power, powerMax) - 9) / Math.max(powerMax - 9, 1) * 100) : 0 } as React.CSSProperties}
               onChange={e => setPower(+e.target.value)}
-              aria-label="Мощность"
+              aria-label="Мощность — всего потоков, шаг 9"
             />
           </div>
 
