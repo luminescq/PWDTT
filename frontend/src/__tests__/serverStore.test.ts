@@ -35,6 +35,12 @@ describe('serverStore', () => {
     expect(all[0].name).toBe('A');
   });
 
+  it('add: сохраняет мощность из профиля', () => {
+    serverStore.add({ name: 'A', host: '1.1.1.1:1111', password: 'pw', power: 18 });
+
+    expect(serverStore.getAll()[0].power).toBe(18);
+  });
+
   it('add: несколько серверов', () => {
     serverStore.add({ name: 'A', host: 'a:1', password: 'p1' });
     serverStore.add({ name: 'B', host: 'b:2', password: 'p2' });

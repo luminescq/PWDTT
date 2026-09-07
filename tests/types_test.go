@@ -145,6 +145,7 @@ func TestProfileData_MarshalRoundtrip(t *testing.T) {
 		PeerAddr: "1.2.3.4:5555",
 		Password: "secret",
 		Hashes:   []string{"h1", "h2"},
+		Workers:  18,
 		Listen:   "127.0.0.1:9000",
 		TurnHost: "turn.example.com",
 		TurnPort: "3478",
@@ -169,6 +170,9 @@ func TestProfileData_MarshalRoundtrip(t *testing.T) {
 	}
 	if len(got.Hashes) != 2 {
 		t.Errorf("Hashes length: got %d, want 2", len(got.Hashes))
+	}
+	if got.Workers != p.Workers {
+		t.Errorf("Workers: got %d, want %d", got.Workers, p.Workers)
 	}
 	if got.Listen != p.Listen {
 		t.Errorf("Listen: got %q, want %q", got.Listen, p.Listen)
@@ -212,6 +216,7 @@ func TestProfileData_JSONTags(t *testing.T) {
 	p := backend.ProfileData{
 		PeerAddr: "1.2.3.4:5555",
 		Password: "x",
+		Workers:  18,
 		DeviceID: "id",
 	}
 
@@ -220,7 +225,7 @@ func TestProfileData_JSONTags(t *testing.T) {
 	json.Unmarshal(data, &raw)
 
 	// Проверяем что JSON ключи соответствуют тегам
-	for _, key := range []string{"peer", "password", "hashes", "listen", "turn", "port", "device_id"} {
+	for _, key := range []string{"peer", "password", "hashes", "workers", "listen", "turn", "port", "device_id"} {
 		if _, ok := raw[key]; !ok {
 			t.Errorf("expected key %q in JSON output", key)
 		}
@@ -238,6 +243,7 @@ func TestProfileData_FromJSON(t *testing.T) {
 		"peer": "5.6.7.8:443",
 		"password": "pw",
 		"hashes": ["a"],
+		"workers": 18,
 		"listen": "0.0.0.0:1080",
 		"turn": "1.1.1.1",
 		"port": "8443",
@@ -251,6 +257,9 @@ func TestProfileData_FromJSON(t *testing.T) {
 
 	if p.PeerAddr != "5.6.7.8:443" {
 		t.Errorf("PeerAddr: got %q", p.PeerAddr)
+	}
+	if p.Workers != 18 {
+		t.Errorf("Workers: got %d, want 18", p.Workers)
 	}
 	if p.Listen != "0.0.0.0:1080" {
 		t.Errorf("Listen: got %q", p.Listen)

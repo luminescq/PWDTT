@@ -50,6 +50,7 @@ export namespace backend {
 	    peer: string;
 	    password: string;
 	    hashes: string[];
+	    workers?: number;
 	    listen: string;
 	    turn: string;
 	    port: string;
@@ -65,6 +66,7 @@ export namespace backend {
 	        this.peer = source["peer"];
 	        this.password = source["password"];
 	        this.hashes = source["hashes"];
+	        this.workers = source["workers"];
 	        this.listen = source["listen"];
 	        this.turn = source["turn"];
 	        this.port = source["port"];
