@@ -43,7 +43,7 @@ export default function AddServer({ onClose, onAdd }: Props) {
       const h4: [string,string,string,string] = [parsed.hashes[0]??'', parsed.hashes[1]??'', parsed.hashes[2]??'', parsed.hashes[3]??''];
       setHashes(h4);
       const filled = h4.filter(x => x.trim()).length;
-      setPower(Math.max(9, filled * 9));
+      setPower(parsed.workers ?? Math.max(9, filled * 9));
     }
   };
 
