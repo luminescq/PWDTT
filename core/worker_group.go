@@ -31,6 +31,10 @@ const (
 
 	// firstBatchSize — сколько воркеров запускаем в первой волне
 	firstBatchSize = 5
+
+	// configRacerLimit bounds concurrent initial config requests. The first
+	// racers are assigned different TURN URLs whenever enough URLs exist.
+	configRacerLimit = 3
 )
 
 func WorkerGroup(
@@ -113,6 +117,7 @@ func WorkerGroup(
 	credStreamID := groupID * 100
 
 	var credsMu sync.RWMutex
+	var refreshMu sync.Mutex
 	var curUser, curPass string
 	var curURLs []string
 	var credGen uint64
@@ -187,7 +192,6 @@ func WorkerGroup(
 		}
 	}
 
-	var configRequestInFlight int32
 	var wg sync.WaitGroup
 
 	// Запускаем воркеры с поэтапной задержкой
@@ -205,7 +209,7 @@ func WorkerGroup(
 			startDelay = time.Duration(firstBatchSize)*workerStartDelay + workerBatchDelay + time.Duration(secondWaveIdx)*workerStartDelay
 		}
 
-		go func(wid int, delay time.Duration) {
+		go func(wid, workerIndex int, delay time.Duration) {
 			// Ждём свою задержку перед стартом
 			select {
 			case <-time.After(delay):
@@ -217,8 +221,10 @@ func WorkerGroup(
 			defer wg.Done()
 
 			shouldGetConfig := getConfig
-			// Счётчик неудач на текущий адрес
+			// Retry state is local to this worker, avoiding synchronized storms.
 			addressAttempts := 0
+			relayOffset := 0
+			lastTurnAddr := ""
 			// Храним текущий ObfsMode для этого воркера (может меняться при WRAP_TIMEOUT)
 			workerObfsMode := tp.ObfsMode
 
@@ -251,16 +257,10 @@ func WorkerGroup(
 					continue
 				}
 
-				// Фильтруем забаненные адреса
-				var available []string
-				for _, u := range urls {
-					if !GlobalBlacklist.IsBanned(u) {
-						available = append(available, u)
-					}
-				}
-
-				// Если все адреса забанены — спим и пробуем заново
-				if len(available) == 0 {
+				// Spread workers deterministically over relays and advance after a
+				// failed relay instead of converging on urls[0].
+				turnAddr, ok := selectTurnURL(urls, wid, relayOffset, GlobalBlacklist.IsBanned)
+				if !ok {
 					log.Printf("[ВОРКЕР #%d] Все TURN-адреса забанены (всего %d), спим %v",
 						wid, len(urls), sleepWhenAllBanned)
 					select {
@@ -270,36 +270,34 @@ func WorkerGroup(
 					continue
 				}
 
-				// Берём первый доступный адрес
-				turnAddr := available[0]
-
-				getConf := false
-				if shouldGetConfig && atomic.LoadInt32(&configSent) == 0 {
-					getConf = atomic.CompareAndSwapInt32(&configRequestInFlight, 0, 1)
+				if turnAddr != lastTurnAddr {
+					addressAttempts = 0
+					lastTurnAddr = turnAddr
 				}
+
+				// A few workers race for config on round-robin-selected relays. This
+				// prevents one silent relay from blocking startup without starting a
+				// config request from every worker.
+				getConf := shouldRaceForConfig(shouldGetConfig, workerIndex, atomic.LoadInt32(&configSent))
 				var cc chan<- string
 				if getConf {
 					cc = configCh
 				}
 
-					// Передаём в RunSession конкретный адрес и креды
-					configDelivered, sessErr := RunSession(
-						ctx, tp, peer, d, localPort,
-						getConf, cc, wid,
-						turnAddr,     // конкретный TURN-адрес
-						wUser,        // username из кредов
-						wPass,        // password из кредов
-						workerObfsMode,
-						credStreamID, // для handleAuthError
-						deviceID, password, stats,
-					)
+				// Передаём в RunSession конкретный адрес и креды
+				configDelivered, sessErr := RunSession(
+					ctx, tp, peer, d, localPort,
+					getConf, cc, wid,
+					turnAddr, // конкретный TURN-адрес
+					wUser,    // username из кредов
+					wPass,    // password из кредов
+					workerObfsMode,
+					credStreamID, // для handleAuthError
+					deviceID, password, stats,
+				)
 
-				if getConf {
-					if configDelivered {
-						atomic.StoreInt32(&configSent, 1)
-					} else {
-						atomic.StoreInt32(&configRequestInFlight, 0)
-					}
+				if getConf && configDelivered {
+					atomic.StoreInt32(&configSent, 1)
 				}
 
 				// Обработка ошибок
@@ -308,7 +306,7 @@ func WorkerGroup(
 						return
 					}
 
-					log.Printf("[ВОРКЕР #%d] Ошибка сессии: %v (адрес=%s, тип=%s)",
+					log.Printf("[ВОРКЕР #%d] [FAILOVER] Сбой сессии: %v (адрес=%s, тип=%s)",
 						wid, sessErr.Err, sessErr.Address, sessErr.Type)
 
 					switch sessErr.Type {
@@ -319,6 +317,8 @@ func WorkerGroup(
 							GlobalBlacklist.Ban(sessErr.Address)
 							log.Printf("[ВОРКЕР #%d] TURN-адрес %s забанен на 5 минут", wid, sessErr.Address)
 						}
+						relayOffset++
+						addressAttempts = 0
 						// Небольшая пауза перед переходом к следующему адресу
 						select {
 						case <-time.After(sleepAfterAddressDead):
@@ -353,6 +353,7 @@ func WorkerGroup(
 									wid, sessErr.Address, addressAttempts)
 							}
 							addressAttempts = 0
+							relayOffset++
 							// Продолжаем цикл — возьмём следующий адрес
 							continue
 						}
@@ -364,16 +365,21 @@ func WorkerGroup(
 						// Креды протухли (401) — обновляем и продолжаем.
 						// Обновляет только один воркер: остальные увидят новый credGen
 						log.Printf("[ВОРКЕР #%d] Ошибка авторизации TURN, обновляю креды", wid)
-						credsMu.Lock()
-						if credGen == gen {
+						refreshMu.Lock()
+						credsMu.RLock()
+						currentGen := credGen
+						credsMu.RUnlock()
+						if currentGen == gen {
 							if err := fetchCreds(); err == nil {
+								credsMu.Lock()
 								credGen++
+								credsMu.Unlock()
 								log.Printf("[ВОРКЕР #%d] Креды обновлены", wid)
 							} else {
 								log.Printf("[ВОРКЕР #%d] Не удалось обновить креды: %v", wid, err)
 							}
 						}
-						credsMu.Unlock()
+						refreshMu.Unlock()
 						select {
 						case <-time.After(2 * time.Second):
 						case <-ctx.Done():
@@ -407,13 +413,45 @@ func WorkerGroup(
 					return
 				}
 			}
-		}(wid, startDelay)
+		}(wid, idx, startDelay)
 	}
 
 	signalSpawnOnce()
 
 	wg.Wait()
 	log.Printf("[ГРУППА #%d] Все воркеры группы завершились.", groupID)
+}
+
+func shouldRaceForConfig(enabled bool, workerIndex int, configSent int32) bool {
+	return enabled && configSent == 0 && workerIndex < configRacerLimit
+}
+
+func normalizeWorkers(n int) int {
+	if n > 108 {
+		n = 108
+	}
+	if n < workersPerGroup {
+		n = workersPerGroup
+	}
+	return (n / workersPerGroup) * workersPerGroup
+}
+
+// selectTurnURL assigns workers round-robin and skips currently banned relays.
+func selectTurnURL(urls []string, workerID, offset int, isBanned func(string) bool) (string, bool) {
+	if len(urls) == 0 {
+		return "", false
+	}
+	start := (workerID - 1 + offset) % len(urls)
+	if start < 0 {
+		start += len(urls)
+	}
+	for i := 0; i < len(urls); i++ {
+		u := urls[(start+i)%len(urls)]
+		if !isBanned(u) {
+			return u, true
+		}
+	}
+	return "", false
 }
 
 func ParseHashes(raw string) []string {
@@ -460,4 +498,5 @@ type TurnParams struct {
 	WrapKey      []byte
 	ObfsMode     string
 	TCPTransport bool
+	allocateGate *allocationGate
 }
