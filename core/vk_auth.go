@@ -358,22 +358,42 @@ func fetchVkCredsSerialized(ctx context.Context, link string, streamID int) (str
 	return fetchVkCreds(ctx, link, streamID)
 }
 
+func shouldRetryVKCallsOutdatedToken(err error) bool {
+	var failure *vkCallsFailure
+	if !errors.As(err, &failure) || !strings.HasPrefix(failure.Step, "step5 ") {
+		return false
+	}
+	return strings.Contains(strings.ToLower(failure.Error()), "error.webrtc.auth.anonym_token.outdated")
+}
+
 func fetchVkCreds(ctx context.Context, link string, streamID int) (string, string, []string, error) {
 	if time.Now().Unix() < globalCaptchaLockout.Load() {
 		return "", "", nil, fmt.Errorf("CAPTCHA_WAIT_REQUIRED: global lockout active")
 	}
 
 	if getVKAuthMode() == "vkcalls" {
-		if user, pass, addrs, err := getVKCredsViaVKCallsPath(ctx, link, streamID); err == nil {
+		user, pass, addrs, err := getVKCredsViaVKCallsPath(ctx, link, streamID)
+		// VK occasionally expires its freshly issued anonymous token between
+		// steps 4 and 5. Retry the whole short-lived chain once rather than
+		// dropping into the much less reliable CAPTCHA fallback.
+		if shouldRetryVKCallsOutdatedToken(err) {
+			log.Printf("[STREAM %d] [VK Auth] Fresh anonymous token was outdated; retrying VK Calls once", streamID)
+			select {
+			case <-ctx.Done():
+				return "", "", nil, ctx.Err()
+			case <-time.After(750 * time.Millisecond):
+			}
+			user, pass, addrs, err = getVKCredsViaVKCallsPath(ctx, link, streamID)
+		}
+		if err == nil {
 			log.Printf("[STREAM %d] [VK Auth] Success via VK Calls path", streamID)
 			return user, pass, addrs, nil
-		} else {
-			if callErr, ok := asCallUnavailableError(err); ok {
-				log.Printf("[STREAM %d] [VK Auth] VK Calls path returned non-retryable call error: %v", streamID, callErr)
-				return "", "", nil, callErr
-			}
-			log.Printf("[STREAM %d] [VK Auth] VK Calls path failed (%s), falling back to legacy", streamID, describeVKCallsFailure(err))
 		}
+		if callErr, ok := asCallUnavailableError(err); ok {
+			log.Printf("[STREAM %d] [VK Auth] VK Calls path returned non-retryable call error: %v", streamID, callErr)
+			return "", "", nil, callErr
+		}
+		log.Printf("[STREAM %d] [VK Auth] VK Calls path failed (%s), falling back to legacy", streamID, describeVKCallsFailure(err))
 	} else {
 		log.Printf("[STREAM %d] [VK Auth] Legacy mode selected, skipping VK Calls path", streamID)
 	}
