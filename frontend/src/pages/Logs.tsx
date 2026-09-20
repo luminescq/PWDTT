@@ -3,7 +3,7 @@ import { IconSearch, IconTrashX, IconCopy, IconCheck } from '@tabler/icons-react
 import { logStore, type LogEntry, type LogLevel } from '../lib/stores/logStore';
 import './Logs.css';
 
-type Filter = 'ALL' | 'INFO' | 'ERROR';
+type Filter = 'ALL' | 'INFO' | 'WARN' | 'ERROR' | 'DEBUG';
 
 const LEVEL_COLOR: Record<LogLevel, string> = {
   INFO:  'var(--text)',
@@ -62,7 +62,7 @@ export default function Logs() {
               <div className="search-inner">
                 <input
                   className="search-input"
-                  placeholder="Поиск...."
+                  placeholder="Поиск..."
                   value={search}
                   onChange={e => setSearch(e.target.value)}
                 />
@@ -71,7 +71,7 @@ export default function Logs() {
             </div>
             <div className="logs-toolbar-right">
               <div className="filter-group">
-                {(['ALL', 'INFO', 'ERROR'] as Filter[]).map(f => (
+                {(['ALL', 'INFO', 'WARN', 'ERROR', 'DEBUG'] as Filter[]).map(f => (
                   <button type="button" key={f} className={`filter-btn${filter === f ? ' filter-btn--active' : ''}`} onClick={() => setFilter(f)}>{f}</button>
                 ))}
               </div>
