@@ -52,7 +52,8 @@ export default function Settings({ onClose }: Props) {
     })));
     const mode = settings.obfsMode || 'audio';
     const accepted = settings.obfsAccepted ? 'да' : 'нет';
-    const full = report + `\n## Settings\n- Obfuscation: ${mode}\n- Obfs accepted: ${accepted}\n`;
+    const transport = settings.turnTcp ? 'TCP' : 'UDP';
+    const full = report + `\n## Settings\n- Obfuscation: ${mode}\n- Obfs accepted: ${accepted}\n- Transport: ${transport}\n`;
     await navigator.clipboard.writeText(full);
     setCopiedReport(true);
     if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current);
