@@ -216,16 +216,20 @@ export default function Connect() {
     ListProfiles().then(profiles => {
       if (!profiles) return;
       const existing = serverStore.getAll();
-      const existingNames = new Set(existing.map(s => s.name));
-      const existingHosts = new Set(existing.map(s => s.host));
       let changed = false;
       for (const [name, p] of Object.entries(profiles)) {
-        if (existingNames.has(name)) continue;
         const host = p.peer || '';
         if (!host) continue;
-        if (existingHosts.has(host)) continue;
+        const stored = existing.find(s => s.name === name || s.host === host);
+        if (stored) {
+          if (p.workers && stored.power !== p.workers) {
+            serverStore.update({ ...stored, power: p.workers });
+            changed = true;
+          }
+          continue;
+        }
         const h4: [string,string,string,string] = [p.hashes?.[0]??'', p.hashes?.[1]??'', p.hashes?.[2]??'', p.hashes?.[3]??''];
-        serverStore.add({ name, host, password: p.password ?? '', hashes: h4 });
+        serverStore.add({ name, host, password: p.password ?? '', hashes: h4, power: p.workers });
         changed = true;
       }
       if (changed) {
@@ -287,6 +291,7 @@ export default function Connect() {
           peer: consumed.host,
           password: consumed.password,
           hashes: h4 as unknown as string[],
+          workers: consumed.workers,
           turn: '', port: consumed.port || '', device_id: '', listen: '', turn_tcp: false,
         });
         const s = serverStore.add({
