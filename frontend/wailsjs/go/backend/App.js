@@ -65,3 +65,11 @@ export function SetObfsAccepted(arg1) {
 export function SetObfsMode(arg1) {
   return window['go']['backend']['App']['SetObfsMode'](arg1);
 }
+
+export function Shutdown(arg1) {
+  return window['go']['backend']['App']['Shutdown'](arg1);
+}
+
+export function Startup(arg1) {
+  return window['go']['backend']['App']['Startup'](arg1);
+}
