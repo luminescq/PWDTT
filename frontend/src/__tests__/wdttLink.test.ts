@@ -107,4 +107,22 @@ describe('parseWdttUrl', () => {
   it('qwdtt без query string → null', () => {
     expect(parseWdttUrl('qwdtt://config')).toBeNull();
   });
+
+  it('workers=abc → undefined', () => {
+    const link = parseWdttUrl('qwdtt://config?peer=1.2.3.4:5555&pass=secret&workers=abc');
+    expect(link).not.toBeNull();
+    expect(link!.workers).toBeUndefined();
+  });
+
+  it('workers=-5 → undefined', () => {
+    const link = parseWdttUrl('qwdtt://config?peer=1.2.3.4:5555&pass=secret&workers=-5');
+    expect(link).not.toBeNull();
+    expect(link!.workers).toBeUndefined();
+  });
+
+  it('workers=9999 → undefined', () => {
+    const link = parseWdttUrl('qwdtt://config?peer=1.2.3.4:5555&pass=secret&workers=9999');
+    expect(link).not.toBeNull();
+    expect(link!.workers).toBeUndefined();
+  });
 });

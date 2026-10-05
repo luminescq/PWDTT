@@ -42,9 +42,21 @@ function parseQwdttConfig(raw: string): WdttLink | null {
   if (!peer || !pass) return null;
 
   const hashes = hashesStr.split(',').map(h => h.trim()).filter(Boolean);
-  const workers = workersStr ? parseInt(workersStr, 10) : undefined;
+  const workers = parseWorkers(workersStr);
 
   return { name, host: peer, password: pass, hashes, workers, port };
+}
+
+// workers валиден только как целое число в диапазоне 9–108 (4 хеша × 27).
+// Любой мусор (NaN, вне диапазона, нечисловой) → undefined, без clamp.
+function parseWorkers(workersStr: string): number | undefined {
+  if (!workersStr) return undefined;
+  const trimmed = workersStr.trim();
+  if (!/^-?\d+$/.test(trimmed)) return undefined;
+  const n = Number(trimmed);
+  if (!Number.isFinite(n) || !Number.isInteger(n)) return undefined;
+  if (n < 9 || n > 108) return undefined;
+  return n;
 }
 
 // Парсинг старого формата: wdtt://IP:DTLS:WG:PROXY:PASSWORD[:HASHES][#name]
