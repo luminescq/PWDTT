@@ -80,9 +80,10 @@ type Core struct {
 	captchaMode       atomic.Value
 	vkAuthMode        atomic.Value
 	events            chan Event
-	startOnce         sync.Once // guard от двойного Start()
-	startErr          atomic.Value // *startFailure — ошибка первого Start(), если он провалился
-	once              sync.Once // guard от двойного Stop()
+	allocateGate *allocationGate
+	startOnce    sync.Once // guard от двойного Start()
+	startErr     atomic.Value // *startFailure — ошибка первого Start(), если он провалился
+	once         sync.Once // guard от двойного Stop()
 }
 
 // startFailure — обёртка для atomic.Value (чтобы разные error-типы не паниковали).
@@ -129,6 +130,7 @@ func New(cfg Config) *Core {
 		cancel:            cancel,
 		CaptchaResultChan: make(chan string, 1),
 		events:            make(chan Event, 1024), // увеличен буфер для логов
+		allocateGate:      newAllocationGate(allocateGateInterval),
 	}
 	c.captchaMode.Store(normalizeCaptchaMode(cfg.CaptchaMode))
 	c.vkAuthMode.Store(normalizeVKAuthMode("vkcalls"))
@@ -228,14 +230,7 @@ func (c *Core) start() error {
 	}
 
 	// Нормализация воркеров
-	n := c.cfg.Workers
-	if n > 108 {
-		n = 108
-	}
-	if n < workersPerGroup {
-		n = workersPerGroup
-	}
-	n = (n / workersPerGroup) * workersPerGroup
+	n := normalizeWorkers(c.cfg.Workers)
 
 	tp := &TurnParams{
 		Host:         c.cfg.TurnHost,
@@ -244,6 +239,7 @@ func (c *Core) start() error {
 		WrapKey:      wrapKey,
 		ObfsMode:     c.cfg.ObfsMode,
 		TCPTransport: c.cfg.TurnTCP,
+		allocateGate: c.allocateGate,
 	}
 
 	// Локальный UDP сокет
@@ -573,7 +569,8 @@ func classifyLevel(msg string) string {
 	switch {
 	case strings.Contains(low, "fatal") || strings.Contains(low, "ошибка") || strings.Contains(low, "error"):
 		return "ERROR"
-	case strings.Contains(low, "warn") || strings.Contains(low, "не удалось") || strings.Contains(low, "retry"):
+	case strings.Contains(low, "warn") || strings.Contains(low, "не удалось") || strings.Contains(low, "retry") ||
+		strings.Contains(low, "[failover]") || strings.Contains(low, "[reconnect]"):
 		return "WARN"
 	default:
 		return "INFO"

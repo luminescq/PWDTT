@@ -8,6 +8,7 @@ import (
 	"net"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/cbeuw/connutil"
@@ -104,6 +105,7 @@ func RunSession(
 	stats *Stats,
 ) (bool, *SessionError) {
 	configDelivered := false
+	var firstWireRead atomic.Bool
 
 	if turnAddr == "" {
 		return false, &SessionError{
@@ -177,6 +179,16 @@ func RunSession(
 		}
 	}
 
+	if tp.allocateGate != nil {
+		if err = tp.allocateGate.Wait(ctx); err != nil {
+			return false, &SessionError{
+				Type:    SessionErrorFatal,
+				Address: turnAddr,
+				Err:     fmt.Errorf("ожидание TURN Allocate: %w", err),
+			}
+		}
+	}
+
 	relay, err := tc.Allocate()
 	if err != nil {
 		errStr := err.Error()
@@ -219,7 +231,19 @@ func RunSession(
 
 	getStreamCache(cacheStreamID).errorCount.Store(0)
 
-	log.Printf("[СЕССИЯ #%d] Relay: %s", sessionID, relay.LocalAddr())
+	log.Printf("[СЕССИЯ #%d] Relay: %s; peer: %s", sessionID, relay.LocalAddr(), peer)
+
+	// Establish and verify the TURN permission before DTLS starts. Otherwise a
+	// failure is hidden inside the relay-writing goroutine and looks like a DTLS
+	// or password timeout.
+	if err = tc.CreatePermission(peer); err != nil {
+		return false, &SessionError{
+			Type:    SessionErrorAddressDead,
+			Address: turnAddr,
+			Err:     fmt.Errorf("TURN CreatePermission для %s: %w", peer, err),
+		}
+	}
+	log.Printf("[СЕССИЯ #%d] TURN permission OK для %s", sessionID, peer)
 
 	pipeA, pipeB := connutil.AsyncPacketPipe()
 
@@ -277,6 +301,9 @@ func RunSession(
 			if readErr != nil {
 				return
 			}
+			if firstWireRead.CompareAndSwap(false, true) {
+				log.Printf("[СЕССИЯ #%d] Первый пакет получен через TURN от %s (%d байт)", sessionID, peer, n)
+			}
 			payload := buf[:n]
 			if useWrap {
 				if !obfsIsRTPPacket(payload) {
@@ -300,6 +327,7 @@ func RunSession(
 		defer relayWg.Done()
 		defer sessCancel()
 		b := make([]byte, readBufSize)
+		firstWrite := true
 		for {
 			n, _, readErr := pipeA.ReadFrom(b)
 			if readErr != nil {
@@ -316,8 +344,14 @@ func RunSession(
 					out = wrapped
 				}
 			}
-			if _, writeErr := relay.WriteTo(out, peer); writeErr != nil {
+			written, writeErr := relay.WriteTo(out, peer)
+			if writeErr != nil {
+				log.Printf("[СЕССИЯ #%d] TURN relay WriteTo %s: %v", sessionID, peer, writeErr)
 				return
+			}
+			if firstWrite {
+				log.Printf("[СЕССИЯ #%d] Первый пакет отправлен через TURN к %s (%d/%d байт)", sessionID, peer, written, len(out))
+				firstWrite = false
 			}
 		}
 	}()
@@ -368,11 +402,20 @@ func RunSession(
 
 	if err != nil {
 		errStr := strings.ToLower(err.Error())
-		if useWrap && (strings.Contains(errStr, "deadline") || strings.Contains(errStr, "timeout")) {
-			return false, &SessionError{
-				Type:    SessionErrorWrapTimeout,
-				Address: turnAddr,
-				Err:     fmt.Errorf("DTLS timeout, пароль/WRAP не подтверждён"),
+		if strings.Contains(errStr, "deadline") || strings.Contains(errStr, "timeout") {
+			if !firstWireRead.Load() {
+				return false, &SessionError{
+					Type:    SessionErrorAddressDead,
+					Address: turnAddr,
+					Err:     fmt.Errorf("TURN relay молчит: ни один пакет от peer не вернулся"),
+				}
+			}
+			if useWrap {
+				return false, &SessionError{
+					Type:    SessionErrorWrapTimeout,
+					Address: turnAddr,
+					Err:     fmt.Errorf("peer ответил, но WRAP/DTLS не подтверждён"),
+				}
 			}
 		}
 		return false, &SessionError{
@@ -488,7 +531,7 @@ func RunSession(
 				if ne, ok := readErr.(net.Error); ok && ne.Timeout() {
 					continue
 				}
-				log.Printf("[ВОРКЕР #%d] Ошибка Reader: %v", sessionID, readErr)
+				log.Printf("[ВОРКЕР #%d] [RECONNECT] Reader завершён: %v", sessionID, readErr)
 				return
 			}
 
